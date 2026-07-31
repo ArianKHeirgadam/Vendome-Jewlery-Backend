@@ -52,6 +52,14 @@ internal static class Guard
         }
     }
 
+    public static void AgainstNegative(decimal value, string parameterName)
+    {
+        if (value < 0)
+        {
+            throw new ArgumentOutOfRangeException(parameterName, "The value cannot be negative.");
+        }
+    }
+
     public static void AgainstNonPositive(long value, string parameterName)
     {
         if (value <= 0)
@@ -81,6 +89,14 @@ internal static class Guard
         if (value < minimum || value > maximum)
         {
             throw new ArgumentOutOfRangeException(parameterName, $"The value must be between {minimum} and {maximum}.");
+        }
+    }
+
+    public static void AgainstPercentage(decimal value, string parameterName)
+    {
+        if (value is < 0 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(parameterName, "The percentage must be between 0 and 100.");
         }
     }
 

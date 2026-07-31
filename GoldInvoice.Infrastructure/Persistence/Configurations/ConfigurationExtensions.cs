@@ -8,6 +8,7 @@ internal static class DatabaseSchemas
 {
     public const string Security = "security";
     public const string Catalog = "catalog";
+    public const string Pricing = "pricing";
     public const string Inventory = "inventory";
     public const string Sales = "sales";
     public const string Billing = "billing";

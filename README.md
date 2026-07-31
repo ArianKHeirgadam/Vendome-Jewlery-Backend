@@ -40,6 +40,14 @@ Authentication endpoints are under `/api/v1/auth`:
 
 The login, refresh, and MFA routes have separate fixed-window rate-limit policies. Owner and Admin sessions are never issued until MFA succeeds. Recovery codes are returned once when MFA is enabled and must be stored by the user in a secure location.
 
+## Phase 4 catalog, pricing, and inventory
+
+Phase 4 adds hierarchical categories, gold-specific variant details, effective-dated pricing rules, safe market-price ingestion, deterministic backend price calculations, aggregate and physical-piece inventory, reservations, transfers, and an append-only stock ledger. The shared initial migration remains unchanged; the additive migration is `AddPhase4CatalogPricingInventory`.
+
+Catalog, pricing, and inventory endpoints are under `/api/v1/catalog`, `/api/v1/pricing`, and `/api/v1/inventory`. They require the existing product or inventory permissions. Product and stock-movement lists are bounded to 100 rows per page. Physical units can be found by ID, serial number, or barcode; acquisition cost is not exposed by read responses.
+
+The Worker polls only explicitly registered `IMarketPriceProvider` implementations and expires overdue reservations. The repository includes a fake provider for tests but no invented production vendor integration. Provider credentials must come from a deployment secret manager or environment variables; `MarketPriceSources` stores only non-sensitive configuration references.
+
 ## Configuration
 
 Configuration is supplied by standard .NET providers. Environment variables use double underscores, for example:
@@ -56,14 +64,19 @@ The default CORS origin list is empty, so cross-origin requests are denied until
 
 The base settings intentionally contain empty database and JWT secrets. The Development profile contains a credential-free Windows LocalDB setting; replace it with user secrets or environment variables when using another SQL Server. Do not commit deployment credentials or signing keys.
 
-For local development, create a persistent random signing key outside the repository. One PowerShell example is:
+For local development, create a persistent random signing key outside the repository. This PowerShell form also works on Windows PowerShell versions that do not expose the static `RandomNumberGenerator.Fill` method:
 
 ```powershell
-$bytes = [byte[]]::new(32)
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$bytes = New-Object byte[] 32
+$rng.GetBytes($bytes)
 dotnet user-secrets set "Jwt:SigningKey" ([Convert]::ToBase64String($bytes)) --project GoldInvoice.Api
+$rng.Dispose()
+Remove-Variable rng,bytes
 dotnet user-secrets set "ConnectionStrings:GoldInvoice" "<local SQL Server connection string>" --project GoldInvoice.Api
 ```
+
+Authenticator keys and recovery-code payloads are protected with ASP.NET Core Data Protection. Production must use a persistent, access-controlled key ring shared by every API instance; do not rely on ephemeral container keys.
 
 ### Initial owner
 
@@ -103,3 +116,5 @@ Architecture decisions are recorded in:
 - [`docs/architecture/phase-1-foundation.md`](docs/architecture/phase-1-foundation.md)
 - [`docs/architecture/phase-2-data-model.md`](docs/architecture/phase-2-data-model.md)
 - [`docs/architecture/phase-3-identity-security.md`](docs/architecture/phase-3-identity-security.md)
+- [`docs/architecture/phase-4-catalog-pricing-inventory.md`](docs/architecture/phase-4-catalog-pricing-inventory.md)
+- [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md)

@@ -4,6 +4,30 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace GoldInvoice.Infrastructure.Persistence.Configurations;
 
+internal sealed class ProductCategoryConfiguration : IEntityTypeConfiguration<ProductCategory>
+{
+    public void Configure(EntityTypeBuilder<ProductCategory> builder)
+    {
+        builder.ToTable("ProductCategories", DatabaseSchemas.Catalog, table =>
+        {
+            table.HasCheckConstraint("CK_ProductCategories_DisplayOrder", "[DisplayOrder] >= 0");
+            table.HasCheckConstraint(
+                "CK_ProductCategories_Parent",
+                "[ParentCategoryId] IS NULL OR [ParentCategoryId] <> [Id]");
+        });
+        builder.ConfigureAuditable();
+        builder.Property(category => category.Name).HasMaxLength(200).IsRequired();
+        builder.Property(category => category.Slug).HasMaxLength(200).IsUnicode(false).IsRequired();
+        builder.Property(category => category.IsActive).HasDefaultValue(true);
+        builder.HasIndex(category => category.Slug).IsUnique();
+        builder.HasIndex(category => new { category.ParentCategoryId, category.DisplayOrder, category.Name });
+        builder.HasOne<ProductCategory>()
+            .WithMany()
+            .HasForeignKey(category => category.ParentCategoryId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
 internal sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
 {
     public void Configure(EntityTypeBuilder<Product> builder)
@@ -24,6 +48,53 @@ internal sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
             .HasFilter("[IsDeleted] = 0");
         builder.HasIndex(product => new { product.IsActive, product.Name })
             .HasFilter("[IsDeleted] = 0");
+        builder.HasIndex(product => new { product.ProductCategoryId, product.IsActive })
+            .HasFilter("[IsDeleted] = 0");
+        builder.HasOne<ProductCategory>()
+            .WithMany()
+            .HasForeignKey(product => product.ProductCategoryId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class GoldProductDetailConfiguration : IEntityTypeConfiguration<GoldProductDetail>
+{
+    public void Configure(EntityTypeBuilder<GoldProductDetail> builder)
+    {
+        builder.ToTable("GoldProductDetails", DatabaseSchemas.Catalog, table =>
+        {
+            table.HasCheckConstraint("CK_GoldProductDetails_Karat", "[Karat] IN (9, 10, 14, 18, 21, 22, 24)");
+            table.HasCheckConstraint("CK_GoldProductDetails_GrossWeight", "[GrossWeight] > 0");
+            table.HasCheckConstraint("CK_GoldProductDetails_NetGoldWeight", "[NetGoldWeight] > 0");
+            table.HasCheckConstraint(
+                "CK_GoldProductDetails_ComponentWeights",
+                "[StoneWeight] >= 0 AND [OtherMaterialWeight] >= 0 AND ([NetGoldWeight] + [StoneWeight] + [OtherMaterialWeight]) <= [GrossWeight]");
+            table.HasCheckConstraint(
+                "CK_GoldProductDetails_StoneState",
+                "([HasStone] = 1 AND [StoneWeight] > 0) OR ([HasStone] = 0 AND [StoneWeight] = 0)");
+            table.HasCheckConstraint(
+                "CK_GoldProductDetails_Wage",
+                "([ManufacturingWageType] IN ('FixedRials', 'PerGramRials') AND [ManufacturingWageAmountRials] IS NOT NULL AND [ManufacturingWageAmountRials] >= 0 AND [ManufacturingWagePercentage] IS NULL) OR " +
+                "([ManufacturingWageType] = 'PercentageOfGoldValue' AND [ManufacturingWageAmountRials] IS NULL AND [ManufacturingWagePercentage] BETWEEN 0 AND 100)");
+            table.HasCheckConstraint(
+                "CK_GoldProductDetails_Percentages",
+                "[ProfitPercentage] BETWEEN 0 AND 100 AND [TaxPercentage] BETWEEN 0 AND 100");
+        });
+        builder.ConfigureAuditable();
+        builder.Property(detail => detail.GrossWeight).HasPrecision(18, 3);
+        builder.Property(detail => detail.NetGoldWeight).HasPrecision(18, 3);
+        builder.Property(detail => detail.StoneWeight).HasPrecision(18, 3);
+        builder.Property(detail => detail.OtherMaterialWeight).HasPrecision(18, 3);
+        builder.Property(detail => detail.ManufacturingWageType).ConfigureEnum();
+        builder.Ignore(detail => detail.ManufacturingWageValue);
+        builder.Property(detail => detail.ManufacturingWagePercentage).HasPrecision(9, 4);
+        builder.Property(detail => detail.ProfitPercentage).HasPrecision(9, 4);
+        builder.Property(detail => detail.TaxPercentage).HasPrecision(9, 4);
+        builder.HasIndex(detail => detail.ProductVariantId).IsUnique();
+        builder.HasOne<ProductVariant>()
+            .WithOne()
+            .HasForeignKey<GoldProductDetail>(detail => detail.ProductVariantId)
+            .OnDelete(DeleteBehavior.NoAction);
     }
 }
 

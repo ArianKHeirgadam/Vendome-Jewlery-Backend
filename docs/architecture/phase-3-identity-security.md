@@ -32,6 +32,8 @@ Owner and Admin access requires MFA. A valid password for a privileged account w
 
 The enrollment endpoints are anonymous only in the HTTP authorization sense; their signed, purpose-limited ticket is required and cannot authenticate as an access token. Production Data Protection keys must be persisted outside an ephemeral container before email-confirmation or password-reset token delivery is added.
 
+Authenticator keys and recovery-code payloads are protected at rest by an Identity user store backed by ASP.NET Core Data Protection. Values created before protection was enabled remain usable and are rewritten in protected form on their first successful read. Every production API instance must use the same persistent, access-controlled key ring and application name; losing or replacing that key ring without a rotation plan makes protected MFA data unreadable.
+
 ## Brute-force and API controls
 
 Identity requires confirmed email, unique email addresses, a minimum 12-character mixed password, PBKDF2 Identity V3 hashing with 210,000 iterations, five failed attempts, and a 15-minute lockout by default. Unknown and locked accounts perform a dummy password verification, and all credential failures return the same public 401 response.
@@ -45,6 +47,8 @@ CORS remains deny-by-default, HTTPS redirection and production HSTS remain enabl
 `Jwt:SigningKey` and `ConnectionStrings:GoldInvoice` are deliberately empty in base settings. They must come from environment variables, .NET user secrets for local development, or a production secret manager. JWT options fail startup for missing or short keys.
 
 Owner bootstrap is disabled by default and requires email, display name, and a password only when explicitly enabled. It creates an Owner only when none exists, confirms the bootstrap email, requires MFA, and never changes the password of an existing account. Bootstrap values must be removed after the first successful startup.
+
+SQL Server startup initialization uses a serializable transaction plus a transaction-owned application lock. Role seeding, permission seeding, Owner grants, and the initial Owner check therefore form one cross-instance critical section and cannot race into two bootstrap Owners.
 
 No schema change is required in Phase 3. Identity, role-permission, session, refresh-token, login-attempt, trusted-device, and security-event tables were created by `InitialDomainModel`; EF reports no pending model changes.
 

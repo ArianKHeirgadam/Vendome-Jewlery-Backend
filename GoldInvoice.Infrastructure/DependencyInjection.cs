@@ -1,9 +1,15 @@
+using GoldInvoice.Application.Catalog;
+using GoldInvoice.Application.Inventory;
+using GoldInvoice.Application.Pricing;
+using GoldInvoice.Application.Security;
+using GoldInvoice.Infrastructure.Catalog;
 using GoldInvoice.Infrastructure.Configuration;
 using GoldInvoice.Infrastructure.Identity;
+using GoldInvoice.Infrastructure.Inventory;
 using GoldInvoice.Infrastructure.Persistence;
 using GoldInvoice.Infrastructure.Persistence.Interceptors;
+using GoldInvoice.Infrastructure.Pricing;
 using GoldInvoice.Infrastructure.Security;
-using GoldInvoice.Application.Security;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +43,11 @@ public static class DependencyInjection
                 options => options.CommandTimeoutSeconds is >= 1 and <= 300,
                 "Database command timeout must be between 1 and 300 seconds.")
             .ValidateOnStart();
+        services
+            .AddOptions<MarketPriceOptions>()
+            .Bind(configuration.GetSection(MarketPriceOptions.SectionName))
+            .Validate(MarketPriceOptions.IsValid, "Market-price settings are invalid.")
+            .ValidateOnStart();
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AuditingSaveChangesInterceptor>();
@@ -58,6 +69,11 @@ public static class DependencyInjection
             .AddDbContextCheck<GoldInvoiceDbContext>(
                 name: "database",
                 tags: ["ready"]);
+
+        services.AddScoped<ICatalogService, CatalogService>();
+        services.AddScoped<IProductPricingService, ProductPricingService>();
+        services.AddScoped<IMarketPriceIngestionService, MarketPriceIngestionService>();
+        services.AddScoped<IInventoryService, InventoryService>();
 
         return services;
     }
@@ -105,6 +121,7 @@ public static class DependencyInjection
             })
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<GoldInvoiceDbContext>()
+            .AddUserStore<ProtectedIdentityUserStore>()
             .AddSignInManager()
             .AddDefaultTokenProviders();
 
@@ -118,7 +135,8 @@ public static class DependencyInjection
             options.TokenLifespan = TimeSpan.FromHours(1);
         });
 
-        services.AddDataProtection();
+        services.AddDataProtection()
+            .SetApplicationName("GoldInvoice");
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IDummyPasswordVerifier, DummyPasswordVerifier>();
         services.AddScoped<ISecurityTokenService, SecurityTokenService>();

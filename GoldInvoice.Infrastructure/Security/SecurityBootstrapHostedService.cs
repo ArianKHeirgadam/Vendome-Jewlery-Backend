@@ -1,3 +1,4 @@
+using System.Data;
 using GoldInvoice.Application.Security;
 using GoldInvoice.Domain.Security;
 using GoldInvoice.Infrastructure.Configuration;
@@ -5,6 +6,7 @@ using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -24,6 +26,12 @@ internal sealed class SecurityBootstrapHostedService(
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 
+        await using var transaction = await BeginBootstrapTransactionAsync(dbContext, cancellationToken);
+        if (transaction is not null && dbContext.Database.IsSqlServer())
+        {
+            await AcquireBootstrapLockAsync(dbContext, cancellationToken);
+        }
+
         await SeedRolesAsync(roleManager);
         await SeedPermissionsAsync(dbContext, cancellationToken);
         await GrantOwnerPermissionsAsync(dbContext, roleManager, cancellationToken);
@@ -33,10 +41,45 @@ internal sealed class SecurityBootstrapHostedService(
             await BootstrapOwnerAsync(userManager, cancellationToken);
         }
 
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         logger.LogInformation("Security roles and permissions are initialized");
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private static async Task<IDbContextTransaction?> BeginBootstrapTransactionAsync(
+        GoldInvoiceDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        if (!dbContext.Database.IsRelational())
+        {
+            return null;
+        }
+
+        return await dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            cancellationToken);
+    }
+
+    private static Task<int> AcquireBootstrapLockAsync(
+        GoldInvoiceDbContext dbContext,
+        CancellationToken cancellationToken) =>
+        dbContext.Database.ExecuteSqlRawAsync(
+            """
+            DECLARE @LockResult int;
+            EXEC @LockResult = sys.sp_getapplock
+                @Resource = N'GoldInvoice.SecurityBootstrap.v1',
+                @LockMode = N'Exclusive',
+                @LockOwner = N'Transaction',
+                @LockTimeout = 15000;
+            IF @LockResult < 0
+                THROW 51000, 'Security bootstrap lock could not be acquired.', 1;
+            """,
+            cancellationToken);
 
     private static async Task SeedRolesAsync(RoleManager<ApplicationRole> roleManager)
     {

@@ -115,6 +115,12 @@ public sealed class AuthenticationFlowTests
         Assert.False(string.IsNullOrWhiteSpace(setup.SharedKey));
         Assert.StartsWith("otpauth://totp/", setup.AuthenticatorUri, StringComparison.Ordinal);
 
+        var dbContext = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
+        var authenticatorToken = await dbContext.UserTokens.SingleAsync();
+        var storedAuthenticatorValue = Assert.IsType<string>(authenticatorToken.Value);
+        Assert.StartsWith("dp:v1:", storedAuthenticatorValue, StringComparison.Ordinal);
+        Assert.DoesNotContain(setup.SharedKey, storedAuthenticatorValue, StringComparison.Ordinal);
+
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var code = GenerateAuthenticatorCode(setup.SharedKey, DateTimeOffset.UtcNow);
         var enabled = await authentication.CompleteMfaEnrollmentAsync(
@@ -126,6 +132,44 @@ public sealed class AuthenticationFlowTests
         Assert.NotEmpty(enabled.Tokens.AccessToken);
         Assert.Equal(10, enabled.RecoveryCodes.Count);
         Assert.True((await userManager.FindByIdAsync(owner.Id.ToString("D")))?.TwoFactorEnabled);
+        var storedTokenValues = (await dbContext.UserTokens.ToListAsync())
+            .Select(token => token.Value ?? string.Empty)
+            .ToArray();
+        Assert.All(
+            enabled.RecoveryCodes,
+            recoveryCode => Assert.All(
+                storedTokenValues,
+                storedValue => Assert.DoesNotContain(
+                    recoveryCode,
+                    storedValue,
+                    StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task SensitiveIdentityToken_LegacyPlaintextIsProtectedOnFirstRead()
+    {
+        await using var provider = CreateProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var user = await CreateUserAsync(scope.ServiceProvider, SecurityRoles.Customer);
+        var dbContext = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
+        dbContext.UserTokens.Add(new IdentityUserToken<Guid>
+        {
+            UserId = user.Id,
+            LoginProvider = "[AspNetUserStore]",
+            Name = "AuthenticatorKey",
+            Value = "legacy-authenticator-secret"
+        });
+        await dbContext.SaveChangesAsync();
+
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var key = await userManager.GetAuthenticatorKeyAsync(user);
+        dbContext.ChangeTracker.Clear();
+        var stored = await dbContext.UserTokens.SingleAsync();
+        var storedValue = Assert.IsType<string>(stored.Value);
+
+        Assert.Equal("legacy-authenticator-secret", key);
+        Assert.StartsWith("dp:v1:", storedValue, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy-authenticator-secret", storedValue, StringComparison.Ordinal);
     }
 
     [Fact]

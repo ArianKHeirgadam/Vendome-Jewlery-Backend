@@ -4,6 +4,7 @@ using GoldInvoice.Domain.Invoicing;
 using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Payments;
 using GoldInvoice.Domain.Platform;
+using GoldInvoice.Domain.Pricing;
 using GoldInvoice.Domain.Security;
 using GoldInvoice.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -40,9 +41,21 @@ public sealed class GoldInvoiceDbContext(
 
     public DbSet<Product> Products => Set<Product>();
 
+    public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
+
     public DbSet<ProductVariant> ProductVariants => Set<ProductVariant>();
 
     public DbSet<ProductImage> ProductImages => Set<ProductImage>();
+
+    public DbSet<GoldProductDetail> GoldProductDetails => Set<GoldProductDetail>();
+
+    public DbSet<ProductPricingRule> ProductPricingRules => Set<ProductPricingRule>();
+
+    public DbSet<MarketPriceSource> MarketPriceSources => Set<MarketPriceSource>();
+
+    public DbSet<MarketPriceSnapshot> MarketPriceSnapshots => Set<MarketPriceSnapshot>();
+
+    public DbSet<PriceCalculationSnapshot> PriceCalculationSnapshots => Set<PriceCalculationSnapshot>();
 
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
 
@@ -53,6 +66,8 @@ public sealed class GoldInvoiceDbContext(
     public DbSet<StockReservation> StockReservations => Set<StockReservation>();
 
     public DbSet<InventoryAdjustment> InventoryAdjustments => Set<InventoryAdjustment>();
+
+    public DbSet<InventoryUnit> InventoryUnits => Set<InventoryUnit>();
 
     public DbSet<Order> Orders => Set<Order>();
 
