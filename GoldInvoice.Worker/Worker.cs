@@ -1,24 +1,25 @@
-namespace GoldInvoice.Worker
+namespace GoldInvoice.Worker;
+
+public sealed partial class Worker(ILogger<Worker> logger) : BackgroundService
 {
-    public class Worker : BackgroundService
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        private readonly ILogger<Worker> _logger;
-
-        public Worker(ILogger<Worker> logger)
+        WorkerStarted(logger);
+        try
         {
-            _logger = logger;
+            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal host shutdown.
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                if (_logger.IsEnabled(LogLevel.Information))
-                {
-                    _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
-                }
-                await Task.Delay(1000, stoppingToken);
-            }
-        }
+        WorkerStopped(logger);
     }
+
+    [LoggerMessage(EventId = 1000, Level = LogLevel.Information, Message = "Background worker started")]
+    private static partial void WorkerStarted(ILogger logger);
+
+    [LoggerMessage(EventId = 1001, Level = LogLevel.Information, Message = "Background worker stopped")]
+    private static partial void WorkerStopped(ILogger logger);
 }

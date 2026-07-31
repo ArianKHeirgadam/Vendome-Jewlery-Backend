@@ -17,6 +17,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GoldInvoice.Api\GoldInvoice.Api.csproj" />
+    <ProjectReference Include="..\GoldInvoice.Application\GoldInvoice.Application.csproj" />
+    <ProjectReference Include="..\GoldInvoice.Infrastructure\GoldInvoice.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 

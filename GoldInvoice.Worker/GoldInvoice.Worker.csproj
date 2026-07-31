@@ -10,4 +10,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GoldInvoice.Application\GoldInvoice.Application.csproj" />
+    <ProjectReference Include="..\GoldInvoice.Contracts\GoldInvoice.Contracts.csproj" />
+    <ProjectReference Include="..\GoldInvoice.Infrastructure\GoldInvoice.Infrastructure.csproj" />
+  </ItemGroup>
 </Project>

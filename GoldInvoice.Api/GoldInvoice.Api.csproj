@@ -10,4 +10,10 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\GoldInvoice.Application\GoldInvoice.Application.csproj" />
+    <ProjectReference Include="..\GoldInvoice.Contracts\GoldInvoice.Contracts.csproj" />
+    <ProjectReference Include="..\GoldInvoice.Infrastructure\GoldInvoice.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>
