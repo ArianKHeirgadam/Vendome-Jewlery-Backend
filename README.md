@@ -1,6 +1,6 @@
 # Vendome Jewelry Invoice Management
 
-.NET 8 modular-monolith foundation for the Vendome jewelry invoice-management platform. The solution follows Clean Architecture and is being delivered in independently verified phases.
+.NET 8 modular monolith for the Vendome jewelry invoice-management platform. The solution follows Clean Architecture and is being delivered in independently verified phases.
 
 ## Projects
 
@@ -20,6 +20,12 @@
 
 The API accepts a safe correlation ID through `X-Correlation-ID` and returns the effective value in the same response header. Errors use RFC 7807-compatible Problem Details and never include exception messages for unhandled server failures.
 
+## Phase 2 database foundation
+
+Phase 2 adds the complete initial domain and SQL Server model: ASP.NET Core Identity persistence, permissions and sessions, catalog, inventory, orders, payments, invoice snapshots, desktop devices, outbox, audit logs, settings, and idempotency records. SQL Server schemas, foreign keys, check constraints, indexes, soft-delete filters, UTC audit timestamps, and `rowversion` concurrency tokens are configured explicitly.
+
+The initial migration is `InitialDomainModel`. No user, role, permission, credential, or owner account is seeded.
+
 ## Configuration
 
 Configuration is supplied by standard .NET providers. Environment variables use double underscores, for example:
@@ -28,9 +34,22 @@ Configuration is supplied by standard .NET providers. Environment variables use 
 AllowedHosts=api.example.com
 Api__AllowedCorsOrigins__0=https://app.example.com
 CorrelationId__HeaderName=X-Correlation-ID
+ConnectionStrings__GoldInvoice=Server=sql.example.internal;Database=VendomeGoldInvoice;Encrypt=True;...
 ```
 
 The default CORS origin list is empty, so cross-origin requests are denied until trusted origins are configured. Plain HTTP origins are accepted only for loopback development hosts.
+
+The base settings intentionally contain an empty database connection string. The Development profile contains a credential-free Windows LocalDB setting; replace it with user secrets or an environment variable when using another SQL Server. Do not commit deployment credentials.
+
+## Database migration
+
+```bash
+dotnet tool restore
+dotnet ef database update \
+  --project GoldInvoice.Infrastructure \
+  --startup-project GoldInvoice.Api \
+  --context GoldInvoiceDbContext
+```
 
 ## Build and test
 
@@ -40,4 +59,7 @@ dotnet build VendomeJewleryInvoiceManagement.sln --configuration Release --no-re
 dotnet test VendomeJewleryInvoiceManagement.sln --configuration Release --no-build
 ```
 
-Architecture decisions for the current foundation are recorded in [`docs/architecture/phase-1-foundation.md`](docs/architecture/phase-1-foundation.md).
+Architecture decisions are recorded in:
+
+- [`docs/architecture/phase-1-foundation.md`](docs/architecture/phase-1-foundation.md)
+- [`docs/architecture/phase-2-data-model.md`](docs/architecture/phase-2-data-model.md)
