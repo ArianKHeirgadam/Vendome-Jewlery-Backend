@@ -1,3 +1,4 @@
+using GoldInvoice.Application.Security;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -23,30 +24,56 @@ public sealed class GlobalExceptionHandler(
 
         var statusCode = exception switch
         {
+            AuthenticationRejectedException => StatusCodes.Status401Unauthorized,
+            SecurityAccessDeniedException => StatusCodes.Status403Forbidden,
+            SecurityResourceNotFoundException => StatusCodes.Status404NotFound,
             BadHttpRequestException badRequestException => badRequestException.StatusCode,
             ArgumentException => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
         };
 
-        logger.Log(
-            statusCode >= StatusCodes.Status500InternalServerError ? LogLevel.Error : LogLevel.Warning,
-            exception,
-            "Request {Method} {Path} failed with status code {StatusCode}",
-            httpContext.Request.Method,
-            httpContext.Request.Path,
-            statusCode);
+        if (exception is AuthenticationRejectedException or
+            SecurityAccessDeniedException or
+            SecurityResourceNotFoundException)
+        {
+            logger.LogInformation(
+                "Request {Method} {Path} was rejected with status code {StatusCode}",
+                httpContext.Request.Method,
+                httpContext.Request.Path,
+                statusCode);
+        }
+        else
+        {
+            logger.Log(
+                statusCode >= StatusCodes.Status500InternalServerError ? LogLevel.Error : LogLevel.Warning,
+                exception,
+                "Request {Method} {Path} failed with status code {StatusCode}",
+                httpContext.Request.Method,
+                httpContext.Request.Path,
+                statusCode);
+        }
 
         httpContext.Response.StatusCode = statusCode;
 
         var problemDetails = new ProblemDetails
         {
             Status = statusCode,
-            Title = statusCode >= StatusCodes.Status500InternalServerError
-                ? "An unexpected error occurred."
-                : "The request could not be processed.",
-            Detail = statusCode >= StatusCodes.Status500InternalServerError
-                ? "The server could not complete the request."
-                : "The request was invalid."
+            Title = statusCode switch
+            {
+                StatusCodes.Status401Unauthorized => "Authentication failed.",
+                StatusCodes.Status403Forbidden => "Access denied.",
+                StatusCodes.Status404NotFound => "Resource not found.",
+                >= StatusCodes.Status500InternalServerError => "An unexpected error occurred.",
+                _ => "The request could not be processed."
+            },
+            Detail = statusCode switch
+            {
+                StatusCodes.Status401Unauthorized => "The credentials or session are invalid.",
+                StatusCodes.Status403Forbidden => "This operation is not permitted.",
+                StatusCodes.Status404NotFound => "The requested resource does not exist.",
+                >= StatusCodes.Status500InternalServerError => "The server could not complete the request.",
+                _ => "The request was invalid."
+            }
         };
 
         await problemDetailsService.TryWriteAsync(new ProblemDetailsContext

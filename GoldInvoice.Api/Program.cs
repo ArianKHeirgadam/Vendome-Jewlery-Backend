@@ -1,10 +1,14 @@
 using GoldInvoice.Api;
 using GoldInvoice.Api.Configuration;
 using GoldInvoice.Api.Middleware;
+using GoldInvoice.Api.Security;
 using GoldInvoice.Application;
 using GoldInvoice.Infrastructure;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,15 +22,39 @@ builder.Logging.AddJsonConsole(options =>
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header
+    });
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecurityScheme
+        {
+            Reference = new OpenApiReference
+            {
+                Type = ReferenceType.SecurityScheme,
+                Id = "Bearer"
+            }
+        }] = []
+    });
+});
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddSecurityInfrastructure(builder.Configuration);
 builder.Services.AddApiFoundation(builder.Configuration);
+builder.Services.AddApiSecurity(builder.Configuration);
 
 var app = builder.Build();
 var apiOptions = app.Services.GetRequiredService<IOptions<ApiHostOptions>>().Value;
 
 app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -39,9 +67,31 @@ else
     app.UseHsts();
 }
 
-app.UseStatusCodePages();
+app.UseStatusCodePages(async statusCodeContext =>
+{
+    var httpContext = statusCodeContext.HttpContext;
+    var problemDetailsService = httpContext.RequestServices.GetRequiredService<IProblemDetailsService>();
+    await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
+    {
+        HttpContext = httpContext,
+        ProblemDetails = new ProblemDetails
+        {
+            Status = httpContext.Response.StatusCode,
+            Title = httpContext.Response.StatusCode switch
+            {
+                StatusCodes.Status401Unauthorized => "Authentication required.",
+                StatusCodes.Status403Forbidden => "Access denied.",
+                StatusCodes.Status404NotFound => "Resource not found.",
+                _ => "The request could not be processed."
+            }
+        }
+    });
+});
 app.UseHttpsRedirection();
+app.UseRouting();
 app.UseCors(ApiServiceCollectionExtensions.CorsPolicyName);
+app.UseRateLimiter();
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
@@ -49,11 +99,11 @@ app.MapHealthChecks(apiOptions.LivenessPath, new HealthCheckOptions
 {
     AllowCachingResponses = false,
     Predicate = registration => registration.Tags.Contains("live")
-});
+}).AllowAnonymous();
 app.MapHealthChecks(apiOptions.ReadinessPath, new HealthCheckOptions
 {
     AllowCachingResponses = false
-});
+}).AllowAnonymous();
 
 app.Run();
 

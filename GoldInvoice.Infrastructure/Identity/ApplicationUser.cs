@@ -44,4 +44,23 @@ public sealed class ApplicationUser : IdentityUser<Guid>, IAuditableEntity
 
         DisplayName = displayName.Trim();
     }
+
+    public void RequireMfa() => MfaRequired = true;
+
+    public void Deactivate(DateTimeOffset deactivatedAt)
+    {
+        if (deactivatedAt == default)
+        {
+            throw new ArgumentException("A deactivation time is required.", nameof(deactivatedAt));
+        }
+
+        IsActive = false;
+        DeactivatedAt = deactivatedAt;
+    }
+
+    public void Reactivate()
+    {
+        IsActive = true;
+        DeactivatedAt = null;
+    }
 }

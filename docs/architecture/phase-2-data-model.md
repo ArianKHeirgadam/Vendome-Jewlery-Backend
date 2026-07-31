@@ -84,7 +84,7 @@ Apply it only after supplying a target-specific connection string:
 dotnet tool restore
 dotnet ef database update \
   --project GoldInvoice.Infrastructure \
-  --startup-project GoldInvoice.Api \
+  --startup-project GoldInvoice.Infrastructure \
   --context GoldInvoiceDbContext
 ```
 
