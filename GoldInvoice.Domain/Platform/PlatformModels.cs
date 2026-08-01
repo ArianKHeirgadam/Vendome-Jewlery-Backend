@@ -146,6 +146,18 @@ public sealed class SystemSetting : AuditableEntity
     public string? Description { get; private set; }
 
     public bool IsReadOnly { get; private set; }
+
+    public void UpdateValue(string dataType, string value)
+    {
+        if (IsReadOnly)
+        {
+            throw new DomainConflictException("A read-only system setting cannot be changed.");
+        }
+
+        DataType = Guard.Required(dataType, nameof(dataType), 50);
+        Value = Guard.Required(value, nameof(value), 4000);
+        SecretReference = null;
+    }
 }
 
 public sealed class IdempotencyRecord : AuditableEntity
@@ -184,4 +196,44 @@ public sealed class IdempotencyRecord : AuditableEntity
     public DateTimeOffset ExpiresAt { get; private set; }
 
     public DateTimeOffset? LockedUntil { get; private set; }
+
+    public void Complete(int responseStatusCode, string responseBody, DateTimeOffset completedAt)
+    {
+        if (Status != IdempotencyRecordStatus.Processing)
+        {
+            throw new DomainConflictException("Only a processing idempotency record can complete.");
+        }
+
+        if (responseStatusCode is < 100 or > 599)
+        {
+            throw new ArgumentOutOfRangeException(nameof(responseStatusCode));
+        }
+
+        Guard.AgainstDefault(completedAt, nameof(completedAt));
+        ResponseStatusCode = responseStatusCode;
+        ResponseBody = Guard.Required(responseBody, nameof(responseBody), int.MaxValue);
+        CompletedAt = completedAt;
+        LockedUntil = null;
+        Status = IdempotencyRecordStatus.Completed;
+    }
+
+    public void Fail(int responseStatusCode, string responseBody, DateTimeOffset completedAt)
+    {
+        if (Status != IdempotencyRecordStatus.Processing)
+        {
+            throw new DomainConflictException("Only a processing idempotency record can fail.");
+        }
+
+        if (responseStatusCode is < 400 or > 599)
+        {
+            throw new ArgumentOutOfRangeException(nameof(responseStatusCode));
+        }
+
+        Guard.AgainstDefault(completedAt, nameof(completedAt));
+        ResponseStatusCode = responseStatusCode;
+        ResponseBody = Guard.Required(responseBody, nameof(responseBody), int.MaxValue);
+        CompletedAt = completedAt;
+        LockedUntil = null;
+        Status = IdempotencyRecordStatus.Failed;
+    }
 }

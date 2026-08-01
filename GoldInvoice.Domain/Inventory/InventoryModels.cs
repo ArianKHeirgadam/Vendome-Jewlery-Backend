@@ -222,7 +222,7 @@ public sealed class StockMovement : AuditableEntity, IAppendOnlyEntity, IProtect
     }
 }
 
-public sealed class StockReservation : AuditableEntity
+public sealed class StockReservation : AuditableEntity, IProtectedFromHardDelete
 {
     private StockReservation()
     {
@@ -234,7 +234,8 @@ public sealed class StockReservation : AuditableEntity
         string reservationKey,
         int quantity,
         DateTimeOffset expiresAt,
-        Guid? inventoryUnitId = null)
+        Guid? inventoryUnitId = null,
+        Guid? orderItemId = null)
     {
         Guard.AgainstEmpty(inventoryItemId, nameof(inventoryItemId));
         Guard.AgainstEmpty(orderId, nameof(orderId));
@@ -245,6 +246,11 @@ public sealed class StockReservation : AuditableEntity
             throw new ArgumentException("A non-empty inventory-unit identifier is required.", nameof(inventoryUnitId));
         }
 
+        if (orderItemId == Guid.Empty)
+        {
+            throw new ArgumentException("A non-empty order-item identifier is required.", nameof(orderItemId));
+        }
+
         if (inventoryUnitId is not null && quantity != 1)
         {
             throw new ArgumentOutOfRangeException(nameof(quantity), "A physical-unit reservation must have quantity one.");
@@ -253,6 +259,7 @@ public sealed class StockReservation : AuditableEntity
         InventoryItemId = inventoryItemId;
         InventoryUnitId = inventoryUnitId;
         OrderId = orderId;
+        OrderItemId = orderItemId;
         ReservationKey = Guard.Required(reservationKey, nameof(reservationKey), 128);
         Quantity = quantity;
         ExpiresAt = expiresAt;
@@ -263,6 +270,8 @@ public sealed class StockReservation : AuditableEntity
     public Guid? InventoryUnitId { get; private set; }
 
     public Guid OrderId { get; private set; }
+
+    public Guid? OrderItemId { get; private set; }
 
     public string ReservationKey { get; private set; } = string.Empty;
 

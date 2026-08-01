@@ -1,11 +1,31 @@
 using GoldInvoice.Domain.Invoicing;
+using GoldInvoice.Domain.Inventory;
 using GoldInvoice.Domain.Orders;
+using GoldInvoice.Domain.Payments;
 using GoldInvoice.Domain.Platform;
+using GoldInvoice.Domain.Pricing;
 using GoldInvoice.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace GoldInvoice.Infrastructure.Persistence.Configurations;
+
+internal sealed class InvoiceSequenceConfiguration : IEntityTypeConfiguration<InvoiceSequence>
+{
+    public void Configure(EntityTypeBuilder<InvoiceSequence> builder)
+    {
+        builder.ToTable("InvoiceSequences", DatabaseSchemas.Invoicing, table =>
+        {
+            table.HasCheckConstraint("CK_InvoiceSequences_NextValue", "[NextValue] > 0");
+        });
+        builder.ConfigureAuditable();
+        builder.Property(sequence => sequence.Series).HasMaxLength(50).IsUnicode(false).IsRequired();
+        builder.Property(sequence => sequence.Prefix).HasMaxLength(20).IsUnicode(false).IsRequired();
+        builder.Property(sequence => sequence.LastIssuedAt).HasPrecision(7);
+        builder.HasIndex(sequence => sequence.Series).IsUnique();
+        builder.HasIndex(sequence => sequence.Prefix).IsUnique();
+    }
+}
 
 internal sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
 {
@@ -30,11 +50,18 @@ internal sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(invoice => invoice.VoidedAt).HasPrecision(7);
         builder.Property(invoice => invoice.VoidReason).HasMaxLength(1000);
         builder.HasIndex(invoice => invoice.OrderId).IsUnique();
+        builder.HasIndex(invoice => invoice.PaymentId)
+            .IsUnique()
+            .HasFilter("[PaymentId] IS NOT NULL");
         builder.HasIndex(invoice => invoice.InvoiceNumber).IsUnique();
         builder.HasIndex(invoice => new { invoice.CustomerId, invoice.IssuedAt });
         builder.HasOne<Order>()
             .WithMany()
             .HasForeignKey(invoice => invoice.OrderId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<Payment>()
+            .WithMany()
+            .HasForeignKey(invoice => invoice.PaymentId)
             .OnDelete(DeleteBehavior.NoAction);
         builder.HasOne<ApplicationUser>()
             .WithMany()
@@ -55,16 +82,99 @@ internal sealed class InvoiceItemConfiguration : IEntityTypeConfiguration<Invoic
             table.HasCheckConstraint(
                 "CK_InvoiceItems_Amounts",
                 "[UnitPriceRials] >= 0 AND [Quantity] > 0 AND [LineTotalRials] = [UnitPriceRials] * [Quantity]");
+            table.HasCheckConstraint(
+                "CK_InvoiceItems_PriceSnapshot",
+                "([OrderItemId] IS NULL AND [PriceCalculationSnapshotId] IS NULL AND [InventoryUnitId] IS NULL AND [NetGoldWeightGrams] IS NULL AND [Karat] IS NULL AND [MarketUnitPriceRials] IS NULL AND [GoldValueRials] IS NULL AND [WageRials] IS NULL AND [ProfitRials] IS NULL AND [TaxRials] IS NULL AND [RoundingPolicy] IS NULL) OR ([OrderItemId] IS NOT NULL AND [PriceCalculationSnapshotId] IS NOT NULL AND [NetGoldWeightGrams] > 0 AND [NetGoldWeightGrams] <= [WeightGrams] AND [Karat] IN (9, 10, 14, 18, 21, 22, 24) AND [MarketUnitPriceRials] >= 0 AND [GoldValueRials] >= 0 AND [WageRials] >= 0 AND [ProfitRials] >= 0 AND [TaxRials] >= 0 AND [UnitPriceRials] = [GoldValueRials] + [WageRials] + [ProfitRials] + [TaxRials] AND [RoundingPolicy] IS NOT NULL)");
         });
         builder.ConfigureAuditable();
         builder.Property(item => item.Sku).HasMaxLength(64).IsUnicode(false).IsRequired();
         builder.Property(item => item.ProductName).HasMaxLength(200).IsRequired();
         builder.Property(item => item.VariantName).HasMaxLength(200).IsRequired();
         builder.Property(item => item.WeightGrams).HasPrecision(18, 3);
+        builder.Property(item => item.NetGoldWeightGrams).HasPrecision(18, 3);
+        builder.Property(item => item.MarketUnitPriceRials).HasColumnType("bigint");
+        builder.Property(item => item.GoldValueRials).HasColumnType("bigint");
+        builder.Property(item => item.WageRials).HasColumnType("bigint");
+        builder.Property(item => item.ProfitRials).HasColumnType("bigint");
+        builder.Property(item => item.TaxRials).HasColumnType("bigint");
+        builder.Property(item => item.RoundingPolicy).HasMaxLength(100).IsUnicode(false);
         builder.HasIndex(item => new { item.InvoiceId, item.LineNumber }).IsUnique();
+        builder.HasIndex(item => item.OrderItemId)
+            .IsUnique()
+            .HasFilter("[OrderItemId] IS NOT NULL");
+        builder.HasIndex(item => item.PriceCalculationSnapshotId)
+            .IsUnique()
+            .HasFilter("[PriceCalculationSnapshotId] IS NOT NULL");
+        builder.HasIndex(item => item.InventoryUnitId)
+            .IsUnique()
+            .HasFilter("[InventoryUnitId] IS NOT NULL");
         builder.HasOne<Invoice>()
             .WithMany()
             .HasForeignKey(item => item.InvoiceId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<OrderItem>()
+            .WithMany()
+            .HasForeignKey(item => item.OrderItemId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<PriceCalculationSnapshot>()
+            .WithMany()
+            .HasForeignKey(item => item.PriceCalculationSnapshotId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<InventoryUnit>()
+            .WithMany()
+            .HasForeignKey(item => item.InventoryUnitId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class InvoiceAddressSnapshotConfiguration : IEntityTypeConfiguration<InvoiceAddressSnapshot>
+{
+    public void Configure(EntityTypeBuilder<InvoiceAddressSnapshot> builder)
+    {
+        builder.ToTable("InvoiceAddressSnapshots", DatabaseSchemas.Invoicing);
+        builder.ConfigureAuditable();
+        builder.Property(snapshot => snapshot.RecipientName).HasMaxLength(200).IsRequired();
+        builder.Property(snapshot => snapshot.PhoneNumber).HasMaxLength(32).IsUnicode(false).IsRequired();
+        builder.Property(snapshot => snapshot.Province).HasMaxLength(100).IsRequired();
+        builder.Property(snapshot => snapshot.City).HasMaxLength(100).IsRequired();
+        builder.Property(snapshot => snapshot.PostalCode).HasMaxLength(20).IsUnicode(false).IsRequired();
+        builder.Property(snapshot => snapshot.AddressLine).HasMaxLength(1000).IsRequired();
+        builder.HasIndex(snapshot => snapshot.InvoiceId).IsUnique();
+        builder.HasIndex(snapshot => snapshot.OrderAddressSnapshotId).IsUnique();
+        builder.HasOne<Invoice>()
+            .WithMany()
+            .HasForeignKey(snapshot => snapshot.InvoiceId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<OrderAddressSnapshot>()
+            .WithMany()
+            .HasForeignKey(snapshot => snapshot.OrderAddressSnapshotId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class InvoiceStoreSnapshotConfiguration : IEntityTypeConfiguration<InvoiceStoreSnapshot>
+{
+    public void Configure(EntityTypeBuilder<InvoiceStoreSnapshot> builder)
+    {
+        builder.ToTable("InvoiceStoreSnapshots", DatabaseSchemas.Invoicing);
+        builder.ConfigureAuditable();
+        builder.Property(snapshot => snapshot.TradeName).HasMaxLength(200).IsRequired();
+        builder.Property(snapshot => snapshot.LegalName).HasMaxLength(200).IsRequired();
+        builder.Property(snapshot => snapshot.NationalId).HasMaxLength(32).IsUnicode(false);
+        builder.Property(snapshot => snapshot.EconomicCode).HasMaxLength(32).IsUnicode(false);
+        builder.Property(snapshot => snapshot.RegistrationNumber).HasMaxLength(32).IsUnicode(false);
+        builder.Property(snapshot => snapshot.PhoneNumber).HasMaxLength(32).IsUnicode(false).IsRequired();
+        builder.Property(snapshot => snapshot.PostalCode).HasMaxLength(20).IsUnicode(false).IsRequired();
+        builder.Property(snapshot => snapshot.AddressLine).HasMaxLength(1000).IsRequired();
+        builder.HasIndex(snapshot => snapshot.InvoiceId).IsUnique();
+        builder.HasIndex(snapshot => snapshot.OrderStoreSnapshotId).IsUnique();
+        builder.HasOne<Invoice>()
+            .WithMany()
+            .HasForeignKey(snapshot => snapshot.InvoiceId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<OrderStoreSnapshot>()
+            .WithMany()
+            .HasForeignKey(snapshot => snapshot.OrderStoreSnapshotId)
             .OnDelete(DeleteBehavior.NoAction);
     }
 }

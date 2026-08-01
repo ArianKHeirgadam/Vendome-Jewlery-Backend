@@ -48,6 +48,16 @@ Catalog, pricing, and inventory endpoints are under `/api/v1/catalog`, `/api/v1/
 
 The Worker polls only explicitly registered `IMarketPriceProvider` implementations and expires overdue reservations. The repository includes a fake provider for tests but no invented production vendor integration. Provider credentials must come from a deployment secret manager or environment variables; `MarketPriceSources` stores only non-sensitive configuration references.
 
+## Phase 5 orders, payments, and invoices
+
+Phase 5 adds customer addresses, idempotent order creation, backend-authoritative price snapshots, atomic stock reservation/confirmation, pluggable payment gateways, authenticated and deduplicated callbacks, manual payments, atomic invoice sequences, immutable invoice snapshots, unpaid-order cancellation, and invoice voiding. The additive migration is `AddPhase5OrdersPaymentsInvoices`; the Phase 2 and Phase 4 migrations remain unchanged.
+
+Routes are under `/api/v1/customers/{customerId}/addresses`, `/api/v1/orders`, `/api/v1/payments`, `/api/v1/invoices`, and `/api/v1/settings/store-profile`. Ownership is enforced for customer reads and mutations; cross-customer and manual-payment operations require existing management permissions. Order and payment creation routes require an `Idempotency-Key` header.
+
+The current seller identity is a typed JSON document under `Store.Profile` in the existing settings table and is copied into every order and invoice. Payment-gateway rows contain only a `ConfigurationReference`; real credentials must remain in an external secret provider. The repository defines `IPaymentGatewayProvider` but does not invent or register a production gateway adapter.
+
+Refunds and returns remain deferred until their business and fiscal rules are confirmed. See [`docs/architecture/phase-5-orders-payments-invoices.md`](docs/architecture/phase-5-orders-payments-invoices.md).
+
 ## Configuration
 
 Configuration is supplied by standard .NET providers. Environment variables use double underscores, for example:
@@ -58,6 +68,9 @@ Api__AllowedCorsOrigins__0=https://app.example.com
 CorrelationId__HeaderName=X-Correlation-ID
 ConnectionStrings__GoldInvoice=Server=sql.example.internal;Database=VendomeGoldInvoice;Encrypt=True;...
 Jwt__SigningKey=<base64-encoded-random-key-of-at-least-32-bytes>
+Payments__ProviderTimeoutSeconds=15
+Invoicing__SequenceSeries=DEFAULT
+Invoicing__SequencePrefix=INV
 ```
 
 The default CORS origin list is empty, so cross-origin requests are denied until trusted origins are configured. Plain HTTP origins are accepted only for loopback development hosts.
@@ -117,4 +130,5 @@ Architecture decisions are recorded in:
 - [`docs/architecture/phase-2-data-model.md`](docs/architecture/phase-2-data-model.md)
 - [`docs/architecture/phase-3-identity-security.md`](docs/architecture/phase-3-identity-security.md)
 - [`docs/architecture/phase-4-catalog-pricing-inventory.md`](docs/architecture/phase-4-catalog-pricing-inventory.md)
+- [`docs/architecture/phase-5-orders-payments-invoices.md`](docs/architecture/phase-5-orders-payments-invoices.md)
 - [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md)

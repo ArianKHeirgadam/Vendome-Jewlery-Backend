@@ -1,4 +1,5 @@
 using GoldInvoice.Domain.Catalog;
+using GoldInvoice.Domain.Customers;
 using GoldInvoice.Domain.Inventory;
 using GoldInvoice.Domain.Invoicing;
 using GoldInvoice.Domain.Orders;
@@ -69,6 +70,8 @@ public sealed class GoldInvoiceDbContext(
 
     public DbSet<InventoryUnit> InventoryUnits => Set<InventoryUnit>();
 
+    public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
+
     public DbSet<Order> Orders => Set<Order>();
 
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
@@ -76,6 +79,10 @@ public sealed class GoldInvoiceDbContext(
     public DbSet<OrderStatusHistory> OrderStatusHistory => Set<OrderStatusHistory>();
 
     public DbSet<OrderAddressSnapshot> OrderAddressSnapshots => Set<OrderAddressSnapshot>();
+
+    public DbSet<OrderStoreSnapshot> OrderStoreSnapshots => Set<OrderStoreSnapshot>();
+
+    public DbSet<PaymentGateway> PaymentGateways => Set<PaymentGateway>();
 
     public DbSet<Payment> Payments => Set<Payment>();
 
@@ -85,7 +92,13 @@ public sealed class GoldInvoiceDbContext(
 
     public DbSet<Invoice> Invoices => Set<Invoice>();
 
+    public DbSet<InvoiceSequence> InvoiceSequences => Set<InvoiceSequence>();
+
     public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
+
+    public DbSet<InvoiceAddressSnapshot> InvoiceAddressSnapshots => Set<InvoiceAddressSnapshot>();
+
+    public DbSet<InvoiceStoreSnapshot> InvoiceStoreSnapshots => Set<InvoiceStoreSnapshot>();
 
     public DbSet<InvoicePrintLog> InvoicePrintLogs => Set<InvoicePrintLog>();
 

@@ -1,15 +1,25 @@
 using GoldInvoice.Application.Catalog;
+using GoldInvoice.Application.Customers;
 using GoldInvoice.Application.Inventory;
+using GoldInvoice.Application.Invoicing;
+using GoldInvoice.Application.Orders;
+using GoldInvoice.Application.Payments;
 using GoldInvoice.Application.Pricing;
 using GoldInvoice.Application.Security;
+using GoldInvoice.Application.Settings;
 using GoldInvoice.Infrastructure.Catalog;
 using GoldInvoice.Infrastructure.Configuration;
+using GoldInvoice.Infrastructure.Customers;
 using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Inventory;
+using GoldInvoice.Infrastructure.Invoicing;
+using GoldInvoice.Infrastructure.Orders;
+using GoldInvoice.Infrastructure.Payments;
 using GoldInvoice.Infrastructure.Persistence;
 using GoldInvoice.Infrastructure.Persistence.Interceptors;
 using GoldInvoice.Infrastructure.Pricing;
 using GoldInvoice.Infrastructure.Security;
+using GoldInvoice.Infrastructure.Settings;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +58,16 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(MarketPriceOptions.SectionName))
             .Validate(MarketPriceOptions.IsValid, "Market-price settings are invalid.")
             .ValidateOnStart();
+        services
+            .AddOptions<PaymentProcessingOptions>()
+            .Bind(configuration.GetSection(PaymentProcessingOptions.SectionName))
+            .Validate(PaymentProcessingOptions.IsValid, "Payment-processing settings are invalid.")
+            .ValidateOnStart();
+        services
+            .AddOptions<InvoicingOptions>()
+            .Bind(configuration.GetSection(InvoicingOptions.SectionName))
+            .Validate(InvoicingOptions.IsValid, "Invoice-sequence settings are invalid.")
+            .ValidateOnStart();
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<AuditingSaveChangesInterceptor>();
@@ -74,6 +94,14 @@ public static class DependencyInjection
         services.AddScoped<IProductPricingService, ProductPricingService>();
         services.AddScoped<IMarketPriceIngestionService, MarketPriceIngestionService>();
         services.AddScoped<IInventoryService, InventoryService>();
+        services.AddScoped<InventoryReservationCoordinator>();
+        services.AddScoped<ICustomerAddressService, CustomerAddressService>();
+        services.AddScoped<IStoreProfileService, StoreProfileService>();
+        services.AddScoped<IOrderService, OrderService>();
+        services.AddScoped<InvoiceService>();
+        services.AddScoped<IInvoiceService>(provider => provider.GetRequiredService<InvoiceService>());
+        services.AddScoped<IInvoiceIssuanceService>(provider => provider.GetRequiredService<InvoiceService>());
+        services.AddScoped<IPaymentService, PaymentService>();
 
         return services;
     }

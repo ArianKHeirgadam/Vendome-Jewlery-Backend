@@ -2,9 +2,9 @@
 
 ## Current Phase
 
-Phase 4: Catalog, pricing, market prices, and inventory workflows.
+Phase 5: Customer addresses, orders, payments, and immutable invoices.
 
-The repository entry point for this phase is commit `4cd41ec`. Phases 1 through 3 are already shared on `main`; they are not rebuilt or squashed. The shared `InitialDomainModel` migration is immutable. Phase 4 database changes must be additive.
+The repository entry point for this phase is commit `ca76a90`. Phases 1 through 4 are already shared on `main`; they are not rebuilt or squashed. The shared `InitialDomainModel` and `AddPhase4CatalogPricingInventory` migrations are immutable. Phase 5 database changes must be additive.
 
 ## Completed Requirements
 
@@ -30,47 +30,49 @@ The repository entry point for this phase is commit `4cd41ec`. Phases 1 through 
 - Explicit Owner bootstrap with no default credential.
 - Phase details and verification are recorded in `docs/architecture/phase-3-identity-security.md`.
 
+### Phase 4: Catalog, pricing, and inventory
+
+- Hierarchical product categories and authoritative gold-product details.
+- Effective-dated fixed, weight, market, and manual-review pricing rules with deterministic rial calculations and immutable calculation snapshots.
+- Validated market-price provider boundary, retry/timeout behavior, safe quote snapshots, and polling worker.
+- Aggregate inventory plus individually tracked physical units, atomic reservations/transfers, overselling protection, and append-only stock movements.
+- Serialized Owner bootstrap and protected MFA material completed as Phase 3 closure work.
+- Phase details and verification are recorded in `docs/architecture/phase-4-catalog-pricing-inventory.md`.
+
 ## Current Phase Requirements
 
-### Phase 3 additions required before Phase 4 closes
+### Customer addresses and store identity
 
-- Serialize initial Owner bootstrap across application instances so two Owners cannot be created by a startup race.
-- Protect Identity authenticator keys and recovery-code payloads at rest with ASP.NET Core Data Protection.
-- Preserve idempotent role and permission seeding and the Owner/Admin/Customer security-policy tests.
+- Customer-owned soft-deletable addresses, one active default per customer, ownership checks, and rowversion-protected updates.
+- Immutable order and invoice address snapshots so address edits never rewrite history.
+- Typed `Store.Profile` JSON in existing system settings, copied into order and invoice snapshots.
+- No unused `StoreProfile` or `DiscountPolicy` table.
 
-### Catalog
+### Orders and inventory coordination
 
-- Hierarchical product categories with unique slugs, active state, display order, cycle validation, and restricted deletion semantics.
-- Product and product-variant APIs with bounded pagination and concurrency tokens.
-- Gold-specific variant details covering karat, gross/net gold/stone/other-material weights, wage method/value, profit, tax, stone presence, and variable-weight behavior.
-- Keep the existing `ProductVariant` compatibility columns intact because `InitialDomainModel` is shared; new APIs use the Phase 4 detail and pricing models as the authoritative calculation inputs.
+- Idempotent order creation with server-generated totals and complete weight, karat, price-component, market-rate, calculation-reference, customer, address, and store snapshots.
+- Serializable reservation of aggregate stock and individually tracked units with stock-ledger entries in the same transaction.
+- Order-linked reservation integrity checks and payment-only confirmation; generic inventory mutations cannot bypass the sales workflow.
+- Ownership-scoped reads and mutations, bounded pagination, optimistic concurrency, and staff-only cross-customer/discount/shipping behavior.
+- Unpaid cancellation that releases reservations, restores tracked units, cancels non-final payments, and records status history atomically.
 
-### Pricing and market prices
+### Payments
 
-- Versioned product-variant pricing rules for fixed, weight-based, market-based, and manual-review pricing.
-- Reject overlapping active rule windows for the same variant.
-- Market-price source and append-only snapshot persistence without provider secrets or raw sensitive payloads.
-- Provider interface, validation, bounded timeout, retry, deterministic latest-valid-price selection, and a fake provider for tests.
-- Backend-only price calculator with itemized components, deterministic rial rounding, audit references, and persisted price-calculation snapshots.
-- A Phase 4 polling job that runs only registered market-price providers; durable outbox processing remains Phase 6.
+- Configurable gateways storing only non-secret configuration references and a pluggable provider interface.
+- Idempotent online initiation with bounded provider timeout, validated HTTPS redirects, masked metadata, and cancellation-safe persistence.
+- Authenticated, request-bounded, rate-limited callbacks with provider/external-ID and provider/payload-hash duplicate boundaries.
+- Gateway, authority, amount, state, and inventory validation before accepting a payment; ambiguous callbacks enter explicit review instead of marking an order paid.
+- Review-state online payments cannot be silently cancelled or replaced by a manual payment.
+- Permission-protected manual payments using the same inventory confirmation and invoice transaction.
 
-### Inventory
+### Invoices
 
-- Support both aggregate quantity inventory and individually tracked physical jewelry units.
-- Unique optional serial numbers and barcodes, actual weight/karat, acquisition cost, warehouse location, and controlled unit status transitions.
-- Atomic stock receipts, adjustments, reservations, releases, confirmations, unit transfers, and aggregate transfers.
-- Every quantity or unit state change must produce an append-only stock movement in the same transaction.
-- Optimistic concurrency and tests for reservation races and overselling.
+- Exactly one invoice per order and verified payment, with an atomic concurrency-protected sequence and unique invoice number.
+- Immutable item/address/store/customer snapshots copied from the paid order.
+- Explicit invoice void transition with reason and rowversion; no deletion or snapshot rewrite.
+- Duplicate callback, duplicate invoice, idempotent order/payment, sequence, filtered-index, no-cascade, and pending-model-change tests.
 
 ## Deferred Requirements
-
-### Phase 5: Orders, payments, and invoices
-
-- Customer addresses and immutable order-address snapshots.
-- Complete order and invoice snapshots of weight, karat, wage, profit, tax, market rate, store identity, and price-calculation audit references.
-- Payment gateways and credential references, callback idempotency, invoice sequences, atomic invoice numbering, immutable invoices, cancellation, returns, and refunds when confirmed by a business use case.
-- Decide whether store identity needs a typed `StoreProfile` or can safely remain in typed system settings, and whether a real discount-policy use case warrants a `DiscountPolicy` entity; do not create either as an unused generic table.
-- Duplicate callback, duplicate invoice, and concurrent invoice-number tests.
 
 ### Phase 6: Worker, outbox, and SignalR
 
@@ -91,31 +93,35 @@ The repository entry point for this phase is commit `4cd41ec`. Phases 1 through 
 - The solution remains a .NET 8 modular monolith with Domain and Application independent of EF Core and ASP.NET Core.
 - Product variants are the sellable pricing and inventory boundary. A product owns catalog presentation; a variant owns gold detail, pricing rules, aggregate stock, and optional physical units.
 - Application interfaces define use cases and provider boundaries. EF Core, transactions, retries, and external adapters remain in Infrastructure. Controllers contain transport mapping only.
-- Market quotes and price calculations are immutable audit inputs. Historical order/invoice snapshots will reference or copy them in Phase 5.
+- Market quotes and price calculations are immutable audit inputs. Phase 5 order and invoice items reference and copy the values required to reproduce a sale.
 - Price calculations use explicit rule inputs and `MidpointRounding.AwayFromZero` to whole Iranian rials. Client-provided totals are never authoritative.
+- Store identity remains a typed document in existing settings; orders and invoices own immutable copies. Payment providers are Infrastructure adapters behind Application contracts.
+- Returns and refunds remain deferred until stock, gateway, partial-return, and fiscal-document rules are confirmed.
 - Image metadata continues to use object-storage `StorageKey`; actual Cloudinary/S3 upload is deferred until a storage provider is selected.
 
 ## Database Decisions
 
-- `InitialDomainModel` is committed and pushed and will never be edited, deleted, or removed from migration history.
-- Phase 4 uses a new additive migration. Existing `ProductVariant` columns are retained for backward compatibility.
+- `InitialDomainModel` and `AddPhase4CatalogPricingInventory` are committed and pushed and will never be edited, deleted, or removed from migration history.
+- Phase 5 uses the additive migration `AddPhase5OrdersPaymentsInvoices`; existing nullable order/invoice extensions preserve legacy rows.
 - New money columns use `bigint` Iranian rials. Weights and percentages use explicit decimal precision; `float` and `double` are prohibited.
-- Foreign keys use `NO ACTION`/restrict semantics. Ledgers, market snapshots, and calculation snapshots are append-only and protected from hard deletion.
+- Foreign keys use `NO ACTION`/restrict semantics. Ledgers, market/calculation snapshots, order/invoice snapshots, and callbacks are append-only or protected from hard deletion.
 - SQL constraints and unique indexes provide the final duplicate and state-safety boundary; Application validation provides useful errors before a constraint is reached.
 
 ## Security Decisions
 
 - Provider API keys, payment credentials, JWT keys, Data Protection keys, and connection strings never enter committed configuration or business tables.
 - Market sources store only non-secret endpoints and configuration references. Raw provider payloads are represented only by a cryptographic hash.
+- Payment gateways also store only external configuration references. Callback authenticity is decided by the registered provider adapter before any payment transition; raw callback bodies are not persisted or logged.
 - Data Protection key rings must be persisted and access-controlled in production; ephemeral container keys are not acceptable for protected MFA data.
-- Catalog mutation, pricing, market ingestion, and inventory mutation endpoints require explicit permissions. Inventory reads never expose acquisition cost to customer-facing APIs.
+- Customer data is ownership-scoped. Cross-customer orders, manual payments, gateway configuration, store settings, status changes, and invoice voiding require existing management permissions.
 
 ## Known Risks
 
-- The target SQL Server instance is reachable only from the user's Windows machine, so this environment cannot inspect its `__EFMigrationsHistory` or apply migrations. Because `InitialDomainModel` is already shared, this does not change the additive migration decision.
+- The target SQL Server instance is reachable only from the user's Windows machine, so this environment cannot inspect its `__EFMigrationsHistory` or apply migrations. This does not change the additive migration decision.
 - No production market-price provider or secret-delivery mechanism has been selected. Phase 4 supplies the provider contract, safe ingestion pipeline, worker scheduling, and fake provider tests without inventing a vendor integration.
-- Store-specific pricing decisions may change. The Phase 4 formula and rounding policy are isolated and versioned so later changes do not rewrite historical calculation snapshots.
+- No production payment gateway adapter or secret-delivery mechanism has been selected. Phase 5 supplies the provider contract and safe orchestration without inventing a vendor integration.
+- Refunds and returns have materially different inventory, payment, and fiscal consequences; implementing them before the business rules are confirmed would create unsafe generic behavior.
 
 ## Next Step
 
-Complete the Phase 3 security additions, then implement and verify the Phase 4 model, APIs, pricing pipeline, inventory transactions, additive migration, and tests. Phase 5 must not begin until Phase 4 restore, build, tests, migration validation, security scans, commit, and push are complete.
+Verify Phase 5 with restore, Release build, the full test suite, `HasPendingModelChanges`, and migration application on the target SQL Server. After inspection and commit/push, begin Phase 6 durable outbox/inbox processing and authorized real-time notifications without folding refund, printing, or desktop scope into that phase.

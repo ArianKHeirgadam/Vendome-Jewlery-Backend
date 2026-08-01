@@ -43,10 +43,18 @@ public static class ApiSecurityServiceCollectionExtensions
 
         var section = configuration.GetSection(AuthenticationRateLimitOptions.SectionName);
         var settings = section.Get<AuthenticationRateLimitOptions>() ?? new AuthenticationRateLimitOptions();
+        var callbackSection = configuration.GetSection(PaymentCallbackRateLimitOptions.SectionName);
+        var callbackSettings = callbackSection.Get<PaymentCallbackRateLimitOptions>() ??
+            new PaymentCallbackRateLimitOptions();
         services
             .AddOptions<AuthenticationRateLimitOptions>()
             .Bind(section)
             .Validate(AuthenticationRateLimitOptions.IsValid, "Authentication rate limits are invalid.")
+            .ValidateOnStart();
+        services
+            .AddOptions<PaymentCallbackRateLimitOptions>()
+            .Bind(callbackSection)
+            .Validate(PaymentCallbackRateLimitOptions.IsValid, "Payment callback rate limits are invalid.")
             .ValidateOnStart();
         services.AddRateLimiter(options =>
         {
@@ -54,6 +62,10 @@ public static class ApiSecurityServiceCollectionExtensions
             AddFixedWindowPolicy(options, RateLimitPolicyNames.Login, settings.Login);
             AddFixedWindowPolicy(options, RateLimitPolicyNames.Refresh, settings.Refresh);
             AddFixedWindowPolicy(options, RateLimitPolicyNames.Mfa, settings.Mfa);
+            AddFixedWindowPolicy(
+                options,
+                RateLimitPolicyNames.PaymentCallback,
+                callbackSettings.Rule);
             options.OnRejected = async (context, cancellationToken) =>
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;

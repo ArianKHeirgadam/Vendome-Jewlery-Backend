@@ -582,6 +582,11 @@ internal sealed class InventoryService(
         await using var transaction = await BeginTransactionAsync(cancellationToken);
         var reservation = await dbContext.StockReservations.FindAsync([reservationId], cancellationToken) ??
             throw new ApplicationResourceNotFoundException();
+        if (reservation.OrderItemId is not null)
+        {
+            throw new ApplicationConflictException();
+        }
+
         var item = await dbContext.InventoryItems.FindAsync([reservation.InventoryItemId], cancellationToken) ??
             throw new ApplicationResourceNotFoundException();
         SetOriginalRowVersion(reservation, reservationRowVersion);

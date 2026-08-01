@@ -116,10 +116,13 @@ internal sealed class StockReservationConfiguration : IEntityTypeConfiguration<S
         builder.HasIndex(reservation => new { reservation.Status, reservation.ExpiresAt });
         builder.HasIndex(reservation => new { reservation.OrderId, reservation.InventoryItemId })
             .IsUnique()
-            .HasFilter("[Status] = 'Active'");
+            .HasFilter("[Status] = 'Active' AND [InventoryUnitId] IS NULL");
         builder.HasIndex(reservation => reservation.InventoryUnitId)
             .IsUnique()
             .HasFilter("[InventoryUnitId] IS NOT NULL AND [Status] = 'Active'");
+        builder.HasIndex(reservation => reservation.OrderItemId)
+            .IsUnique()
+            .HasFilter("[OrderItemId] IS NOT NULL");
         builder.HasOne<InventoryItem>()
             .WithMany()
             .HasForeignKey(reservation => reservation.InventoryItemId)
@@ -127,6 +130,10 @@ internal sealed class StockReservationConfiguration : IEntityTypeConfiguration<S
         builder.HasOne<Order>()
             .WithMany()
             .HasForeignKey(reservation => reservation.OrderId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<OrderItem>()
+            .WithMany()
+            .HasForeignKey(reservation => reservation.OrderItemId)
             .OnDelete(DeleteBehavior.NoAction);
         builder.HasOne<InventoryUnit>()
             .WithMany()
