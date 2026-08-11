@@ -2,6 +2,7 @@ using GoldInvoice.Application.Catalog;
 using GoldInvoice.Application.Customers;
 using GoldInvoice.Application.Inventory;
 using GoldInvoice.Application.Invoicing;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Orders;
 using GoldInvoice.Application.Payments;
 using GoldInvoice.Application.Pricing;
@@ -13,6 +14,7 @@ using GoldInvoice.Infrastructure.Customers;
 using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Inventory;
 using GoldInvoice.Infrastructure.Invoicing;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Orders;
 using GoldInvoice.Infrastructure.Payments;
 using GoldInvoice.Infrastructure.Persistence;
@@ -68,8 +70,14 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(InvoicingOptions.SectionName))
             .Validate(InvoicingOptions.IsValid, "Invoice-sequence settings are invalid.")
             .ValidateOnStart();
+        services
+            .AddOptions<OutboxOptions>()
+            .Bind(configuration.GetSection(OutboxOptions.SectionName))
+            .Validate(OutboxOptions.IsValid, "Outbox settings are invalid.")
+            .ValidateOnStart();
 
         services.TryAddSingleton(TimeProvider.System);
+        services.AddHttpContextAccessor();
         services.AddScoped<AuditingSaveChangesInterceptor>();
         services.AddDbContext<GoldInvoiceDbContext>((serviceProvider, options) =>
         {
@@ -102,7 +110,19 @@ public static class DependencyInjection
         services.AddScoped<IInvoiceService>(provider => provider.GetRequiredService<InvoiceService>());
         services.AddScoped<IInvoiceIssuanceService>(provider => provider.GetRequiredService<InvoiceService>());
         services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IOutboxWriter, OutboxWriter>();
+        services.AddScoped<IOutboxStore, OutboxStore>();
+        services.AddSingleton<IOutboxDispatcher, OutboxDispatcher>();
+        services.AddScoped<IOutboxAdministrationService, OutboxAdministrationService>();
+        services.AddScoped<IIntegrationEventQueryService, IntegrationEventQueryService>();
 
+        return services;
+    }
+
+    public static IServiceCollection AddOutboxProcessing(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddHostedService<OutboxDispatchHostedService>();
         return services;
     }
 

@@ -3,6 +3,7 @@ using GoldInvoice.Application.Common;
 using GoldInvoice.Application.Customers;
 using GoldInvoice.Application.Inventory;
 using GoldInvoice.Application.Invoicing;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Orders;
 using GoldInvoice.Application.Payments;
 using GoldInvoice.Application.Pricing;
@@ -18,6 +19,7 @@ using GoldInvoice.Infrastructure.Customers;
 using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Inventory;
 using GoldInvoice.Infrastructure.Invoicing;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Orders;
 using GoldInvoice.Infrastructure.Payments;
 using GoldInvoice.Infrastructure.Persistence;
@@ -25,6 +27,7 @@ using GoldInvoice.Infrastructure.Persistence.Interceptors;
 using GoldInvoice.Infrastructure.Pricing;
 using GoldInvoice.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -63,6 +66,14 @@ public sealed class PhaseFiveWorkflowTests
             (await scenario.Context.StockReservations.SingleAsync()).Status);
         Assert.Equal(0, (await scenario.Context.InventoryItems.SingleAsync()).QuantityOnHand);
         Assert.Equal(OrderStatus.Paid, (await scenario.Context.Orders.SingleAsync()).Status);
+        var outbox = await scenario.Context.OutboxMessages.AsNoTracking().ToListAsync();
+        Assert.Equal(7, outbox.Count);
+        Assert.Single(outbox.Where(message =>
+            message.MessageType == IntegrationEventTypes.InvoiceCreatedV1));
+        Assert.Equal(3, outbox.Count(message =>
+            message.MessageType == IntegrationEventTypes.OrderStatusChangedV1));
+        Assert.Equal(3, outbox.Count(message =>
+            message.MessageType == IntegrationEventTypes.InventoryChangedV1));
     }
 
     [Fact]
@@ -283,6 +294,7 @@ public sealed class PhaseFiveWorkflowTests
     {
         await using var scenario = await CreateScenarioAsync(createOrder: false);
         var command = scenario.CreateOrderCommand("order-idempotency-key-200");
+        var outboxCountBefore = await scenario.Context.OutboxMessages.CountAsync();
 
         var first = await scenario.OrderService.CreateOrderAsync(command, CancellationToken.None);
         var duplicate = await scenario.OrderService.CreateOrderAsync(command, CancellationToken.None);
@@ -292,6 +304,9 @@ public sealed class PhaseFiveWorkflowTests
         Assert.Single(await scenario.Context.OrderItems.ToListAsync());
         Assert.Single(await scenario.Context.StockReservations.ToListAsync());
         Assert.Single(await scenario.Context.IdempotencyRecords.ToListAsync());
+        Assert.Equal(
+            outboxCountBefore + 3,
+            await scenario.Context.OutboxMessages.CountAsync());
     }
 
     [Fact]
@@ -301,7 +316,10 @@ public sealed class PhaseFiveWorkflowTests
         var product = await scenario.Context.Products.SingleAsync();
         var variant = await scenario.Context.ProductVariants.SingleAsync();
         var warehouse = await scenario.Context.Warehouses.SingleAsync();
-        var inventory = new InventoryService(scenario.Context, scenario.TimeProvider);
+        var inventory = new InventoryService(
+            scenario.Context,
+            TestOutboxWriter.Instance,
+            scenario.TimeProvider);
         var firstUnit = await inventory.ReceiveInventoryUnitAsync(
             new ReceiveInventoryUnitCommand(
                 product.Id,
@@ -375,7 +393,10 @@ public sealed class PhaseFiveWorkflowTests
         await using var scenario = await CreateScenarioAsync();
         var reservation = await scenario.Context.StockReservations.SingleAsync();
         var inventoryItem = await scenario.Context.InventoryItems.SingleAsync();
-        var inventory = new InventoryService(scenario.Context, scenario.TimeProvider);
+        var inventory = new InventoryService(
+            scenario.Context,
+            TestOutboxWriter.Instance,
+            scenario.TimeProvider);
 
         await Assert.ThrowsAsync<ApplicationConflictException>(() =>
             inventory.ConfirmReservationAsync(
@@ -559,7 +580,8 @@ public sealed class PhaseFiveWorkflowTests
         var warehouse = new Warehouse("MAIN", "Main warehouse");
         context.Warehouses.Add(warehouse);
         await context.SaveChangesAsync();
-        var inventory = new InventoryService(context, timeProvider);
+        var outboxWriter = new OutboxWriter(context, new HttpContextAccessor());
+        var inventory = new InventoryService(context, outboxWriter, timeProvider);
         var inventoryItem = await inventory.ReceiveStockAsync(
             new ReceiveStockCommand(
                 warehouse.Id,
@@ -569,16 +591,18 @@ public sealed class PhaseFiveWorkflowTests
                 Guid.NewGuid(),
                 null),
             CancellationToken.None);
-        var coordinator = new InventoryReservationCoordinator(context, timeProvider);
+        var coordinator = new InventoryReservationCoordinator(context, outboxWriter, timeProvider);
         var orderService = new OrderService(
             context,
             pricing,
             storeService,
             coordinator,
+            outboxWriter,
             timeProvider);
         var invoiceService = new InvoiceService(
             context,
             Options.Create(new InvoicingOptions()),
+            outboxWriter,
             timeProvider);
         var scenario = new Scenario(
             context,
@@ -588,6 +612,7 @@ public sealed class PhaseFiveWorkflowTests
             orderService,
             coordinator,
             invoiceService,
+            outboxWriter,
             timeProvider);
         if (createOrder)
         {
@@ -616,6 +641,7 @@ public sealed class PhaseFiveWorkflowTests
         OrderService orderService,
         InventoryReservationCoordinator coordinator,
         InvoiceService invoiceService,
+        IOutboxWriter outboxWriter,
         TimeProvider timeProvider) : IAsyncDisposable
     {
         public GoldInvoiceDbContext Context { get; } = context;
@@ -649,6 +675,7 @@ public sealed class PhaseFiveWorkflowTests
             providers,
             coordinator,
             invoiceService,
+            outboxWriter,
             Options.Create(new PaymentProcessingOptions
             {
                 ProviderTimeoutSeconds = 2,

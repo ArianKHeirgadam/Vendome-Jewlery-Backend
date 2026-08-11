@@ -58,6 +58,14 @@ The current seller identity is a typed JSON document under `Store.Profile` in th
 
 Refunds and returns remain deferred until their business and fiscal rules are confirmed. See [`docs/architecture/phase-5-orders-payments-invoices.md`](docs/architecture/phase-5-orders-payments-invoices.md).
 
+## Phase 6 worker, outbox, and realtime events
+
+Phase 6 reuses `integration.OutboxMessages` for transactional `invoice.created.v1`, `inventory.changed.v1`, `order.status-changed.v1`, and `market-price.updated.v1` events. The API-hosted dispatcher uses atomic SQL Server claims, expiring locks and heartbeat renewal, capped exponential retry, sanitized failures, dead-lettering, and audited permission-protected reprocessing. No Phase 6 database migration is required.
+
+Authenticated clients connect to `/hubs/integration` and receive the `integrationEvent` SignalR method. User, role, and active owned-device groups are assigned only by the server. Missed hints are recovered through the bounded, audience-scoped `GET /api/v1/integration/events` cursor API. Dead-letter inspection and reprocessing are under `/api/v1/integration/outbox/dead-letters` and require `Outbox.Reprocess`.
+
+The Worker now runs market-price polling and reservation expiration as independent hosted services and schedules. See [`docs/architecture/phase-6-worker-outbox-signalr.md`](docs/architecture/phase-6-worker-outbox-signalr.md).
+
 ## Configuration
 
 Configuration is supplied by standard .NET providers. Environment variables use double underscores, for example:
@@ -71,6 +79,10 @@ Jwt__SigningKey=<base64-encoded-random-key-of-at-least-32-bytes>
 Payments__ProviderTimeoutSeconds=15
 Invoicing__SequenceSeries=DEFAULT
 Invoicing__SequencePrefix=INV
+Outbox__BatchSize=50
+Outbox__LockDurationSeconds=60
+Outbox__HeartbeatIntervalSeconds=20
+Worker__ReservationSweepIntervalSeconds=30
 ```
 
 The default CORS origin list is empty, so cross-origin requests are denied until trusted origins are configured. Plain HTTP origins are accepted only for loopback development hosts.
@@ -131,4 +143,5 @@ Architecture decisions are recorded in:
 - [`docs/architecture/phase-3-identity-security.md`](docs/architecture/phase-3-identity-security.md)
 - [`docs/architecture/phase-4-catalog-pricing-inventory.md`](docs/architecture/phase-4-catalog-pricing-inventory.md)
 - [`docs/architecture/phase-5-orders-payments-invoices.md`](docs/architecture/phase-5-orders-payments-invoices.md)
+- [`docs/architecture/phase-6-worker-outbox-signalr.md`](docs/architecture/phase-6-worker-outbox-signalr.md)
 - [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md)

@@ -75,6 +75,7 @@ public static class ApiServiceCollectionExtensions
                         HeaderNames.Authorization,
                         HeaderNames.ContentType,
                         correlationOptions.HeaderName,
+                        "X-SignalR-User-Agent",
                         "Idempotency-Key")
                     .WithExposedHeaders(correlationOptions.HeaderName)
                     .SetPreflightMaxAge(TimeSpan.FromHours(1));

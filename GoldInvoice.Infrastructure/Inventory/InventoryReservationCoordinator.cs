@@ -1,6 +1,8 @@
 using GoldInvoice.Application.Common;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Domain.Inventory;
 using GoldInvoice.Domain.Orders;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +10,7 @@ namespace GoldInvoice.Infrastructure.Inventory;
 
 internal sealed class InventoryReservationCoordinator(
     GoldInvoiceDbContext dbContext,
+    IOutboxWriter outboxWriter,
     TimeProvider timeProvider)
 {
     public StockReservation Reserve(
@@ -45,6 +48,7 @@ internal sealed class InventoryReservationCoordinator(
             reason: null);
         dbContext.StockReservations.Add(reservation);
         dbContext.StockMovements.Add(movement);
+        outboxWriter.AddInventoryChanged(inventoryItem, movement);
         return reservation;
     }
 
@@ -124,7 +128,7 @@ internal sealed class InventoryReservationCoordinator(
             reservation.Confirm(confirmedAt);
             item.ConfirmReservation(reservation.Quantity);
             unit?.Sell(confirmedAt);
-            dbContext.StockMovements.Add(CreateMovement(
+            var movement = CreateMovement(
                 item,
                 StockMovementType.ReservationConfirmed,
                 -reservation.Quantity,
@@ -132,7 +136,9 @@ internal sealed class InventoryReservationCoordinator(
                 unit?.Id,
                 "Payment",
                 paymentId,
-                reason: null));
+                reason: null);
+            dbContext.StockMovements.Add(movement);
+            outboxWriter.AddInventoryChanged(item, movement);
         }
     }
 
@@ -187,7 +193,7 @@ internal sealed class InventoryReservationCoordinator(
             reservation.Release(releasedAt);
             item.ReleaseReservation(reservation.Quantity);
             unit?.ReleaseReservation();
-            dbContext.StockMovements.Add(CreateMovement(
+            var movement = CreateMovement(
                 item,
                 StockMovementType.ReservationReleased,
                 quantityDelta: 0,
@@ -195,7 +201,9 @@ internal sealed class InventoryReservationCoordinator(
                 unit?.Id,
                 "OrderCancellation",
                 orderId,
-                reason));
+                reason);
+            dbContext.StockMovements.Add(movement);
+            outboxWriter.AddInventoryChanged(item, movement);
         }
     }
 

@@ -1,8 +1,10 @@
 using GoldInvoice.Api;
 using GoldInvoice.Api.Configuration;
+using GoldInvoice.Api.Integration;
 using GoldInvoice.Api.Middleware;
 using GoldInvoice.Api.Security;
 using GoldInvoice.Application;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -21,6 +23,11 @@ builder.Logging.AddJsonConsole(options =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = false;
+    options.MaximumReceiveMessageSize = 32 * 1024;
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -46,9 +53,11 @@ builder.Services.AddSwaggerGen(options =>
 });
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<IIntegrationEventHandler, SignalRIntegrationEventHandler>();
 builder.Services.AddSecurityInfrastructure(builder.Configuration);
 builder.Services.AddApiFoundation(builder.Configuration);
 builder.Services.AddApiSecurity(builder.Configuration);
+builder.Services.AddOutboxProcessing();
 
 var app = builder.Build();
 var apiOptions = app.Services.GetRequiredService<IOptions<ApiHostOptions>>().Value;
@@ -95,6 +104,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<IntegrationHub>(IntegrationHub.Route);
 app.MapHealthChecks(apiOptions.LivenessPath, new HealthCheckOptions
 {
     AllowCachingResponses = false,

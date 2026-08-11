@@ -1,6 +1,8 @@
 using GoldInvoice.Application.Common;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Inventory;
 using GoldInvoice.Domain.Inventory;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -9,6 +11,7 @@ namespace GoldInvoice.Infrastructure.Inventory;
 
 internal sealed class InventoryService(
     GoldInvoiceDbContext dbContext,
+    IOutboxWriter outboxWriter,
     TimeProvider timeProvider) : IInventoryService
 {
     private const int MaximumPageSize = 100;
@@ -169,6 +172,7 @@ internal sealed class InventoryService(
             command.ReferenceId,
             command.Reason);
         dbContext.StockMovements.Add(movement);
+        outboxWriter.AddInventoryChanged(item, movement);
         await SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
         return MapInventoryItem(item);
@@ -201,6 +205,7 @@ internal sealed class InventoryService(
         movement.SetReference("InventoryAdjustment", adjustment.Id, command.Reason);
         dbContext.StockMovements.Add(movement);
         dbContext.InventoryAdjustments.Add(adjustment);
+        outboxWriter.AddInventoryChanged(item, movement);
         await SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
         return MapInventoryItem(item);
@@ -280,6 +285,7 @@ internal sealed class InventoryService(
             reason: null);
         dbContext.InventoryUnits.Add(unit);
         dbContext.StockMovements.Add(movement);
+        outboxWriter.AddInventoryChanged(item, movement);
         await SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
         return MapInventoryUnit(unit);
@@ -353,6 +359,7 @@ internal sealed class InventoryService(
             reason: null);
         dbContext.StockReservations.Add(reservation);
         dbContext.StockMovements.Add(movement);
+        outboxWriter.AddInventoryChanged(item, movement);
         await SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
         return MapReservation(reservation);
@@ -426,8 +433,7 @@ internal sealed class InventoryService(
         source.Adjust(-command.Quantity);
         destination.Receive(command.Quantity);
         var transferId = Guid.NewGuid();
-        dbContext.StockMovements.AddRange(
-            CreateMovement(
+        var sourceMovement = CreateMovement(
                 source,
                 StockMovementType.TransferOut,
                 -command.Quantity,
@@ -435,8 +441,8 @@ internal sealed class InventoryService(
                 null,
                 "InventoryTransfer",
                 transferId,
-                null),
-            CreateMovement(
+                null);
+        var destinationMovement = CreateMovement(
                 destination,
                 StockMovementType.TransferIn,
                 command.Quantity,
@@ -444,7 +450,10 @@ internal sealed class InventoryService(
                 null,
                 "InventoryTransfer",
                 transferId,
-                null));
+                null);
+        dbContext.StockMovements.AddRange(sourceMovement, destinationMovement);
+        outboxWriter.AddInventoryChanged(source, sourceMovement);
+        outboxWriter.AddInventoryChanged(destination, destinationMovement);
         await SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
     }
@@ -482,8 +491,7 @@ internal sealed class InventoryService(
         destination.Receive(1);
         unit.TransferTo(destination.WarehouseId, destination.Id);
         var transferId = Guid.NewGuid();
-        dbContext.StockMovements.AddRange(
-            CreateMovement(
+        var sourceMovement = CreateMovement(
                 source,
                 StockMovementType.TransferOut,
                 -1,
@@ -491,8 +499,8 @@ internal sealed class InventoryService(
                 unit.Id,
                 "InventoryUnitTransfer",
                 transferId,
-                null),
-            CreateMovement(
+                null);
+        var destinationMovement = CreateMovement(
                 destination,
                 StockMovementType.TransferIn,
                 1,
@@ -500,7 +508,10 @@ internal sealed class InventoryService(
                 unit.Id,
                 "InventoryUnitTransfer",
                 transferId,
-                null));
+                null);
+        dbContext.StockMovements.AddRange(sourceMovement, destinationMovement);
+        outboxWriter.AddInventoryChanged(source, sourceMovement);
+        outboxWriter.AddInventoryChanged(destination, destinationMovement);
         await SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
         return MapInventoryUnit(unit);
@@ -556,7 +567,7 @@ internal sealed class InventoryService(
                 unit.ReleaseReservation();
             }
 
-            dbContext.StockMovements.Add(CreateMovement(
+            var movement = CreateMovement(
                 item,
                 StockMovementType.ReservationReleased,
                 quantityDelta: 0,
@@ -564,7 +575,9 @@ internal sealed class InventoryService(
                 unit?.Id,
                 referenceType: "StockReservationExpiration",
                 referenceId: reservation.Id,
-                reason: null));
+                reason: null);
+            dbContext.StockMovements.Add(movement);
+            outboxWriter.AddInventoryChanged(item, movement);
         }
 
         await SaveChangesAsync(cancellationToken);
@@ -612,7 +625,7 @@ internal sealed class InventoryService(
             unit?.ReleaseReservation();
         }
 
-        dbContext.StockMovements.Add(CreateMovement(
+        var movement = CreateMovement(
             item,
             confirm ? StockMovementType.ReservationConfirmed : StockMovementType.ReservationReleased,
             quantityDelta: confirm ? -reservation.Quantity : 0,
@@ -620,7 +633,9 @@ internal sealed class InventoryService(
             unit?.Id,
             referenceType: "StockReservation",
             referenceId: reservation.Id,
-            reason: null));
+            reason: null);
+        dbContext.StockMovements.Add(movement);
+        outboxWriter.AddInventoryChanged(item, movement);
         await SaveChangesAsync(cancellationToken);
         await CommitAsync(transaction, cancellationToken);
         return MapReservation(reservation);

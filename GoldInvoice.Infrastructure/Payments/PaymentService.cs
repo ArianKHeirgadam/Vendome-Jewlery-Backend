@@ -1,10 +1,12 @@
 using GoldInvoice.Application.Common;
 using GoldInvoice.Application.Invoicing;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Payments;
 using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Payments;
 using GoldInvoice.Infrastructure.Configuration;
 using GoldInvoice.Infrastructure.Inventory;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -17,6 +19,7 @@ internal sealed class PaymentService(
     IEnumerable<IPaymentGatewayProvider> providers,
     InventoryReservationCoordinator reservationCoordinator,
     IInvoiceIssuanceService invoiceIssuanceService,
+    IOutboxWriter outboxWriter,
     IOptions<PaymentProcessingOptions> options,
     TimeProvider timeProvider,
     ILogger<PaymentService> logger) : IPaymentService
@@ -395,6 +398,7 @@ internal sealed class PaymentService(
             now,
             command.ActorUserId,
             "Manual payment verified"));
+        outboxWriter.AddOrderStatusChanged(order, fromStatus, now);
         await reservationCoordinator.ConfirmForPaymentAsync(
             order.Id,
             payment.Id,
@@ -654,6 +658,7 @@ internal sealed class PaymentService(
             now,
             changedBy: null,
             reason: "Verified payment callback"));
+        outboxWriter.AddOrderStatusChanged(order, previousStatus, now);
         await reservationCoordinator.ConfirmForPaymentAsync(
             order.Id,
             payment.Id,
@@ -778,6 +783,7 @@ internal sealed class PaymentService(
                 occurredAt,
                 changedBy: null,
                 reason: reason));
+            outboxWriter.AddOrderStatusChanged(order, fromStatus, occurredAt);
         }
     }
 

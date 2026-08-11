@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using GoldInvoice.Application.Common;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Pricing;
 using GoldInvoice.Domain.Pricing;
 using GoldInvoice.Infrastructure.Configuration;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -15,6 +17,7 @@ internal sealed partial class MarketPriceIngestionService(
     GoldInvoiceDbContext dbContext,
     IEnumerable<IMarketPriceProvider> providers,
     IOptions<MarketPriceOptions> options,
+    IOutboxWriter outboxWriter,
     TimeProvider timeProvider,
     ILogger<MarketPriceIngestionService> logger) : IMarketPriceIngestionService
 {
@@ -103,7 +106,7 @@ internal sealed partial class MarketPriceIngestionService(
             }
 
             var validationStatus = ValidateQuote(quote, capturedAt, options.Value);
-            dbContext.MarketPriceSnapshots.Add(new MarketPriceSnapshot(
+            var snapshot = new MarketPriceSnapshot(
                 source.Id,
                 quote.PriceType,
                 Math.Max(0, quote.BuyPriceRials),
@@ -112,7 +115,13 @@ internal sealed partial class MarketPriceIngestionService(
                 quote.ProviderTimestamp,
                 validationStatus == MarketPriceValidationStatus.Accepted,
                 validationStatus,
-                rawPayloadHash));
+                rawPayloadHash);
+            dbContext.MarketPriceSnapshots.Add(snapshot);
+            if (validationStatus == MarketPriceValidationStatus.Accepted)
+            {
+                outboxWriter.AddMarketPriceUpdated(snapshot);
+            }
+
             added++;
         }
 

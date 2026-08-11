@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Text.Encodings.Web;
+using GoldInvoice.Api.Integration;
 using GoldInvoice.Application.Security;
 using GoldInvoice.Infrastructure.Configuration;
 using Microsoft.AspNetCore.Authentication;
@@ -22,18 +23,27 @@ internal sealed class BearerTokenAuthenticationHandler(
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         var authorization = Request.Headers[HeaderNames.Authorization].ToString();
-        if (string.IsNullOrWhiteSpace(authorization))
+        string encodedToken;
+        if (!string.IsNullOrWhiteSpace(authorization))
+        {
+            const string prefix = "Bearer ";
+            if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return AuthenticateResult.Fail("A valid bearer token is required.");
+            }
+
+            encodedToken = authorization[prefix.Length..].Trim();
+        }
+        else if (Request.Path.StartsWithSegments(IntegrationHub.Route) &&
+                 Request.Query.TryGetValue("access_token", out var queryTokens) &&
+                 queryTokens.Count == 1)
+        {
+            encodedToken = queryTokens[0]?.Trim() ?? string.Empty;
+        }
+        else
         {
             return AuthenticateResult.NoResult();
         }
-
-        const string prefix = "Bearer ";
-        if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return AuthenticateResult.Fail("A valid bearer token is required.");
-        }
-
-        var encodedToken = authorization[prefix.Length..].Trim();
         if (encodedToken.Length is < 32 or > 8192)
         {
             return AuthenticateResult.Fail("A valid bearer token is required.");

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GoldInvoice.Application.Common;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Orders;
 using GoldInvoice.Application.Pricing;
 using GoldInvoice.Application.Settings;
@@ -9,6 +10,7 @@ using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Payments;
 using GoldInvoice.Domain.Platform;
 using GoldInvoice.Infrastructure.Inventory;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,6 +21,7 @@ internal sealed class OrderService(
     IProductPricingService pricingService,
     IStoreProfileService storeProfileService,
     InventoryReservationCoordinator reservationCoordinator,
+    IOutboxWriter outboxWriter,
     TimeProvider timeProvider) : IOrderService
 {
     private const int MaximumPageSize = 100;
@@ -279,6 +282,7 @@ internal sealed class OrderService(
             OrderStatus.Pending,
             now,
             command.ActorUserId));
+        outboxWriter.AddOrderStatusChanged(order, fromStatus: null, now);
 
         var expiresAt = now.AddMinutes(command.ReservationLifetimeMinutes);
         foreach (var draft in drafts)
@@ -321,6 +325,7 @@ internal sealed class OrderService(
             OrderStatus.AwaitingPayment,
             now,
             command.ActorUserId));
+        outboxWriter.AddOrderStatusChanged(order, OrderStatus.Pending, now);
         idempotencyRecord.Complete(201, order.Id.ToString("D"), now);
         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
@@ -380,6 +385,7 @@ internal sealed class OrderService(
             now,
             command.ActorUserId,
             command.Reason));
+        outboxWriter.AddOrderStatusChanged(order, fromStatus, now);
         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
         return await GetOrderAsync(
@@ -419,13 +425,15 @@ internal sealed class OrderService(
             order.Complete();
         }
 
+        var changedAt = timeProvider.GetUtcNow();
         dbContext.OrderStatusHistory.Add(new OrderStatusHistory(
             order.Id,
             fromStatus,
             order.Status,
-            timeProvider.GetUtcNow(),
+            changedAt,
             command.ActorUserId,
             command.Reason));
+        outboxWriter.AddOrderStatusChanged(order, fromStatus, changedAt);
         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
         return await GetOrderAsync(order.Id, command.ActorUserId, canReadAll: true, cancellationToken);

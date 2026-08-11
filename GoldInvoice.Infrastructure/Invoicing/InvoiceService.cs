@@ -1,10 +1,12 @@
 using GoldInvoice.Application.Common;
 using GoldInvoice.Application.Invoicing;
+using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Orders;
 using GoldInvoice.Domain.Invoicing;
 using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Payments;
 using GoldInvoice.Infrastructure.Configuration;
+using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Orders;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +17,7 @@ namespace GoldInvoice.Infrastructure.Invoicing;
 internal sealed class InvoiceService(
     GoldInvoiceDbContext dbContext,
     IOptions<InvoicingOptions> options,
+    IOutboxWriter outboxWriter,
     TimeProvider timeProvider) : IInvoiceService, IInvoiceIssuanceService
 {
     private const int MaximumPageSize = 100;
@@ -252,6 +255,7 @@ internal sealed class InvoiceService(
             store.PhoneNumber,
             store.PostalCode,
             store.AddressLine));
+        outboxWriter.AddInvoiceCreated(invoice, issuedAt);
         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
         return AssertSingle(await MapInvoicesAsync([invoice], cancellationToken));

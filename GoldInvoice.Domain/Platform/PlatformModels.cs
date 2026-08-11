@@ -47,7 +47,7 @@ public sealed class DesktopDevice : AuditableEntity
     public DateTimeOffset? RevokedAt { get; private set; }
 }
 
-public sealed class OutboxMessage : AuditableEntity
+public sealed class OutboxMessage : AuditableEntity, IProtectedFromHardDelete
 {
     private OutboxMessage()
     {
@@ -80,6 +80,108 @@ public sealed class OutboxMessage : AuditableEntity
     public Guid? LockId { get; private set; }
 
     public DateTimeOffset? LockedUntil { get; private set; }
+
+    public bool CanBeClaimed(DateTimeOffset now) =>
+        (Status is OutboxMessageStatus.Pending or OutboxMessageStatus.Failed &&
+         (NextRetryAt is null || NextRetryAt <= now)) ||
+        (Status == OutboxMessageStatus.Processing && LockedUntil <= now);
+
+    public void Claim(Guid lockId, DateTimeOffset lockedUntil, DateTimeOffset now)
+    {
+        Guard.AgainstEmpty(lockId, nameof(lockId));
+        Guard.AgainstDefault(lockedUntil, nameof(lockedUntil));
+        Guard.AgainstDefault(now, nameof(now));
+        if (!CanBeClaimed(now) || lockedUntil <= now)
+        {
+            throw new DomainConflictException("The outbox message cannot be claimed.");
+        }
+
+        Status = OutboxMessageStatus.Processing;
+        LockId = lockId;
+        LockedUntil = lockedUntil;
+    }
+
+    public void RenewLock(Guid lockId, DateTimeOffset lockedUntil, DateTimeOffset now)
+    {
+        EnsureLockOwner(lockId, now, requireUnexpiredLock: true);
+        if (lockedUntil <= now)
+        {
+            throw new ArgumentOutOfRangeException(nameof(lockedUntil));
+        }
+
+        LockedUntil = lockedUntil;
+    }
+
+    public void MarkProcessed(Guid lockId, DateTimeOffset processedAt)
+    {
+        EnsureLockOwner(lockId, processedAt, requireUnexpiredLock: false);
+        Status = OutboxMessageStatus.Processed;
+        ProcessedAt = processedAt;
+        NextRetryAt = null;
+        LastError = null;
+        LockId = null;
+        LockedUntil = null;
+    }
+
+    public void MarkFailed(
+        Guid lockId,
+        string failure,
+        DateTimeOffset failedAt,
+        DateTimeOffset? nextRetryAt,
+        bool deadLetter)
+    {
+        EnsureLockOwner(lockId, failedAt, requireUnexpiredLock: false);
+        if (!deadLetter && (nextRetryAt is null || nextRetryAt <= failedAt))
+        {
+            throw new ArgumentOutOfRangeException(nameof(nextRetryAt));
+        }
+
+        RetryCount = checked(RetryCount + 1);
+        LastError = Guard.Required(failure, nameof(failure), 4000);
+        Status = deadLetter ? OutboxMessageStatus.DeadLetter : OutboxMessageStatus.Failed;
+        NextRetryAt = deadLetter ? null : nextRetryAt;
+        LockId = null;
+        LockedUntil = null;
+    }
+
+    public void ReleaseClaim(Guid lockId, DateTimeOffset nextRetryAt, DateTimeOffset releasedAt)
+    {
+        EnsureLockOwner(lockId, releasedAt, requireUnexpiredLock: false);
+        if (nextRetryAt < releasedAt)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nextRetryAt));
+        }
+
+        Status = OutboxMessageStatus.Failed;
+        NextRetryAt = nextRetryAt;
+        LockId = null;
+        LockedUntil = null;
+    }
+
+    public void Reprocess(DateTimeOffset requestedAt)
+    {
+        Guard.AgainstDefault(requestedAt, nameof(requestedAt));
+        if (Status != OutboxMessageStatus.DeadLetter)
+        {
+            throw new DomainConflictException("Only a dead-letter outbox message can be reprocessed.");
+        }
+
+        Status = OutboxMessageStatus.Pending;
+        NextRetryAt = requestedAt;
+        LockId = null;
+        LockedUntil = null;
+    }
+
+    private void EnsureLockOwner(Guid lockId, DateTimeOffset now, bool requireUnexpiredLock)
+    {
+        Guard.AgainstEmpty(lockId, nameof(lockId));
+        Guard.AgainstDefault(now, nameof(now));
+        if (Status != OutboxMessageStatus.Processing || LockId != lockId ||
+            (requireUnexpiredLock && LockedUntil <= now))
+        {
+            throw new DomainConflictException("The outbox processing lock is not owned by this dispatcher.");
+        }
+    }
 }
 
 public sealed class AuditLog : AuditableEntity, IAppendOnlyEntity, IProtectedFromHardDelete
@@ -114,6 +216,23 @@ public sealed class AuditLog : AuditableEntity, IAppendOnlyEntity, IProtectedFro
     public string? OldValuesJson { get; private set; }
 
     public string? NewValuesJson { get; private set; }
+
+    public void SetContext(Guid? actorUserId, string? correlationId)
+    {
+        if (actorUserId == Guid.Empty)
+        {
+            throw new ArgumentException("A non-empty actor identifier is required.", nameof(actorUserId));
+        }
+
+        ActorUserId = actorUserId;
+        CorrelationId = Guard.Optional(correlationId, nameof(correlationId), 128);
+    }
+
+    public void SetValues(string? oldValuesJson, string? newValuesJson)
+    {
+        OldValuesJson = Guard.Optional(oldValuesJson, nameof(oldValuesJson), int.MaxValue);
+        NewValuesJson = Guard.Optional(newValuesJson, nameof(newValuesJson), int.MaxValue);
+    }
 }
 
 public sealed class SystemSetting : AuditableEntity

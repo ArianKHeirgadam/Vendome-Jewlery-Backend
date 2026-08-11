@@ -117,15 +117,18 @@ public sealed class PhaseFourWorkflowTests
                 "MarketProviders:Fake"),
             CancellationToken.None);
         var provider = new FakeMarketPriceProvider(FixedNow, failuresBeforeSuccess: 1);
+        var outboxWriter = new TestOutboxWriter();
         var ingestion = new MarketPriceIngestionService(
             context,
             [provider],
             options,
+            outboxWriter,
             timeProvider,
             NullLogger<MarketPriceIngestionService>.Instance);
 
         var stored = await ingestion.PollSourceAsync("fake", CancellationToken.None);
         var duplicateStored = await ingestion.PollSourceAsync("fake", CancellationToken.None);
+        Assert.Single(outboxWriter.Events);
         var rule = await pricing.CreateRuleAsync(
             new CreateProductPricingRuleCommand(
                 variant.Id,
@@ -199,10 +202,12 @@ public sealed class PhaseFourWorkflowTests
                 0,
                 FixedNow,
                 new string('B', 64)));
+        var outboxWriter = new TestOutboxWriter();
         var ingestion = new MarketPriceIngestionService(
             context,
             [provider],
             options,
+            outboxWriter,
             timeProvider,
             NullLogger<MarketPriceIngestionService>.Instance);
 
@@ -211,6 +216,7 @@ public sealed class PhaseFourWorkflowTests
         Assert.False(snapshot.IsValid);
         Assert.Equal(MarketPriceValidationStatus.NonPositive, snapshot.ValidationStatus);
         Assert.Equal(0, snapshot.BuyPriceRials);
+        Assert.Empty(outboxWriter.Events);
         await Assert.ThrowsAsync<ApplicationResourceNotFoundException>(() =>
             pricing.GetLatestMarketPriceAsync(MarketPriceType.Gold18K, CancellationToken.None));
     }
@@ -227,7 +233,7 @@ public sealed class PhaseFourWorkflowTests
         var order = new Order(Guid.NewGuid(), "ORDER-001", 1_000_000, 0, 0);
         context.AddRange(warehouse, order);
         await context.SaveChangesAsync();
-        var inventory = new InventoryService(context, timeProvider);
+        var inventory = new InventoryService(context, TestOutboxWriter.Instance, timeProvider);
         var item = await inventory.ReceiveStockAsync(
             new ReceiveStockCommand(warehouse.Id, variant.Id, 3, "Purchase", Guid.NewGuid(), null),
             CancellationToken.None);
@@ -288,7 +294,7 @@ public sealed class PhaseFourWorkflowTests
         var destinationWarehouse = new Warehouse("DEST", "Destination warehouse");
         context.AddRange(sourceWarehouse, destinationWarehouse);
         await context.SaveChangesAsync();
-        var inventory = new InventoryService(context, timeProvider);
+        var inventory = new InventoryService(context, TestOutboxWriter.Instance, timeProvider);
 
         var received = await inventory.ReceiveInventoryUnitAsync(
             new ReceiveInventoryUnitCommand(

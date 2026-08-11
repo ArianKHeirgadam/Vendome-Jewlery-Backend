@@ -14,7 +14,13 @@ builder.Logging.AddJsonConsole(options =>
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddHostedService<Worker>();
+builder.Services
+    .AddOptions<WorkerScheduleOptions>()
+    .Bind(builder.Configuration.GetSection(WorkerScheduleOptions.SectionName))
+    .Validate(WorkerScheduleOptions.IsValid, "Worker schedules are invalid.")
+    .ValidateOnStart();
+builder.Services.AddHostedService<MarketPriceWorker>();
+builder.Services.AddHostedService<ReservationExpirationWorker>();
 
 var host = builder.Build();
 host.Run();
