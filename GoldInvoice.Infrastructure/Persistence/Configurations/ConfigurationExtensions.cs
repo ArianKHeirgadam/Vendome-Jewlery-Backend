@@ -18,6 +18,8 @@ internal static class DatabaseSchemas
     public const string Audit = "audit";
     public const string Configuration = "configuration";
     public const string Platform = "platform";
+    public const string Business = "business";
+    public const string Crm = "crm";
 }
 
 internal static class ConfigurationExtensions

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using GoldInvoice.Application.Security;
+using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -42,7 +43,7 @@ internal sealed class AccessTokenPrincipalValidator(
                 candidate.Id == sessionId && candidate.UserId == userId,
                 cancellationToken);
 
-        if (user is null || session is null || !user.IsActive || !user.EmailConfirmed ||
+        if (user is null || session is null || !user.IsActive || !IsContactConfirmed(user) ||
             !session.IsActiveAt(now) || string.IsNullOrWhiteSpace(user.SecurityStamp) ||
             !SecurityHashing.FixedTimeEquals(session.SecurityStamp, user.SecurityStamp) ||
             !SecurityHashing.FixedTimeEquals(stampHash, SecurityHashing.Sha256(user.SecurityStamp)))
@@ -79,6 +80,10 @@ internal sealed class AccessTokenPrincipalValidator(
 
         return true;
     }
+
+    private static bool IsContactConfirmed(ApplicationUser user) =>
+        (!string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed) ||
+        (!string.IsNullOrWhiteSpace(user.PhoneNumber) && user.PhoneNumberConfirmed);
 
     private static string? FindClaim(ClaimsPrincipal principal, string claimType) =>
         principal.FindFirst(claimType)?.Value;

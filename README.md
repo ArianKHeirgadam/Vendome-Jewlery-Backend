@@ -10,6 +10,8 @@
 - `GoldInvoice.Infrastructure`: technical adapters; depends on Application, Domain, and Contracts.
 - `GoldInvoice.Api`: HTTP composition root.
 - `GoldInvoice.Worker`: background-processing composition root.
+- `GoldInvoice.Client`: shared React + TypeScript UI for the website and Desktop host.
+- `VendomeJewleryDesktopApp`: full-screen WPF/WebView2 host for the shared React client.
 - `GoldInvoice.UnitTests`: Domain and Application tests.
 - `GoldInvoice.IntegrationTests`: API and infrastructure-boundary tests.
 
@@ -50,7 +52,7 @@ The Worker polls only explicitly registered `IMarketPriceProvider` implementatio
 
 ## Phase 5 orders, payments, and invoices
 
-Phase 5 adds customer addresses, idempotent order creation, backend-authoritative price snapshots, atomic stock reservation/confirmation, pluggable payment gateways, authenticated and deduplicated callbacks, manual payments, atomic invoice sequences, immutable invoice snapshots, unpaid-order cancellation, and invoice voiding. The additive migration is `AddPhase5OrdersPaymentsInvoices`; the Phase 2 and Phase 4 migrations remain unchanged.
+Phase 5 adds customer addresses, idempotent order creation, backend-authoritative price snapshots, atomic stock reservation/confirmation, pluggable payment gateways, authenticated and deduplicated callbacks, manual payments, atomic invoice sequences, protected invoice snapshots, unpaid-order cancellation, and invoice voiding. Financial/item/store snapshots remain immutable; Phase 7C-A adds only audited correction of buyer and delivery print fields. The additive migration is `AddPhase5OrdersPaymentsInvoices`; the Phase 2 and Phase 4 migrations remain unchanged.
 
 Routes are under `/api/v1/customers/{customerId}/addresses`, `/api/v1/orders`, `/api/v1/payments`, `/api/v1/invoices`, and `/api/v1/settings/store-profile`. Ownership is enforced for customer reads and mutations; cross-customer and manual-payment operations require existing management permissions. Order and payment creation routes require an `Idempotency-Key` header.
 
@@ -65,6 +67,78 @@ Phase 6 reuses `integration.OutboxMessages` for transactional `invoice.created.v
 Authenticated clients connect to `/hubs/integration` and receive the `integrationEvent` SignalR method. User, role, and active owned-device groups are assigned only by the server. Missed hints are recovered through the bounded, audience-scoped `GET /api/v1/integration/events` cursor API. Dead-letter inspection and reprocessing are under `/api/v1/integration/outbox/dead-letters` and require `Outbox.Reprocess`.
 
 The Worker now runs market-price polling and reservation expiration as independent hosted services and schedules. See [`docs/architecture/phase-6-worker-outbox-signalr.md`](docs/architecture/phase-6-worker-outbox-signalr.md).
+
+## Phase 7A desktop client integration
+
+The shared React client now uses the existing `/api/v1/auth` flow for password login, required TOTP/recovery-code MFA, first-login MFA enrollment, access-token refresh, `/me`, and logout. Access tokens remain in React memory. In the Windows host, refresh tokens never enter browser storage: WebView2 sends authentication commands to WPF, and WPF protects the rotating refresh token with Windows DPAPI for the current Windows user.
+
+The authenticated client connects to the existing `/hubs/integration` Hub and listens only to server-assigned user and role audiences. It stores a non-secret recovery cursor, de-duplicates event IDs, and uses `/api/v1/integration/events` after reconnect. SignalR events remain hints; API/database state remains authoritative.
+
+The Desktop virtual origin is `https://desktop.vendome.invalid` and is explicitly allowed by CORS. `http://localhost:5173` is allowed only in Development for the Vite server. The Desktop settings screen accepts HTTPS endpoints, loopback HTTP, or temporary private-LAN HTTP; Phase 8 still requires encrypted production transport.
+
+Phase 7A makes no database-model change and creates no migration. See [`docs/architecture/phase-7a-desktop-client-integration.md`](docs/architecture/phase-7a-desktop-client-integration.md).
+
+## Phase 7B operational pages
+
+Every authenticated sidebar item now has a real route and management page. Products, pricing, inventory, customers, addresses, orders, payments, invoices, reports, settings, sessions, and market data use the existing authenticated APIs. Dashboard mock values are no longer used at runtime, global search operates across authorized API results, and the greeting derives the first name from the database-backed `/api/v1/auth/me` display name.
+
+Customer and employee directories, inventory/payment list reads, suppliers, and CRM interactions have complete API paths. Suppliers and CRM required persistent models and are introduced by the single additive `AddPhase7BusinessDirectories` migration; the three earlier migrations remain unchanged. Apply it before starting the updated API:
+
+```powershell
+.\scripts\apply-phase7b-migration.ps1
+```
+
+In Development the script resolves the connection in this order: explicit
+`-ConnectionString`, `ConnectionStrings__GoldInvoice`, API user secrets, then
+`GoldInvoice.Api/appsettings.Development.json`. Production requires an explicit
+parameter or environment value. This prevents EF Core from silently falling
+back to the design-time database.
+
+Device enrollment, printer discovery, and durable device-bound dispatch remain
+Phase 7C-B. See
+[`docs/architecture/phase-7b-operational-pages.md`](docs/architecture/phase-7b-operational-pages.md).
+
+## Phase 7C-A invoice documents
+
+After a payment is verified, the Desktop client now opens the issued invoice
+automatically. The invoice page provides an A4 RTL preview plus separate icons
+for controlled document correction, PDF download, and printing. PDF and printer
+output use the same escaped document source, so preview, download, and paper
+copies cannot drift apart.
+
+Financial values and item snapshots stay locked. Authorized corrections are
+limited to buyer/recipient and printed address fields, require a reason and
+rowversion, and write old/new values to the existing audit log. Print attempts
+reuse `InvoicePrintLogs`; successful reprints require the existing
+`Invoices.Reprint` permission and a reason. No database migration is required.
+
+The current Vendome A4 design is the replaceable document boundary. An approved
+invoice PDF can be mapped later without changing order, payment, or print
+orchestration. Device enrollment, printer discovery, and device-bound profiles
+remain Phase 7C-B. See
+[`docs/architecture/phase-7c-invoice-documents.md`](docs/architecture/phase-7c-invoice-documents.md).
+
+## Phase 8 supplier purchases, product images, and actual profit
+
+Supplier purchases now record quantity, unit acquisition cost, and the manual
+store selling price in one atomic operation. The operation increases inventory,
+updates the weighted-average acquisition cost, replaces the active fixed selling
+price for the selected variant, and writes an append-only purchase record.
+Orders and invoices preserve a nullable acquisition-cost snapshot, so later
+purchases cannot change historical profit and legacy stock without a known cost
+does not create fake profit.
+
+The dashboard profit series is now merchandise revenue minus snapshotted
+acquisition cost and invoice discount. Category composition uses current-month
+invoice revenue and supports click selection plus product filtering. Products
+support an authenticated primary JPG, PNG, or WebP image stored locally beside
+the offline application data.
+
+Apply the new additive migration before starting the API:
+
+```powershell
+.\scripts\apply-phase8-migration.ps1
+```
 
 ## Configuration
 
@@ -85,7 +159,7 @@ Outbox__HeartbeatIntervalSeconds=20
 Worker__ReservationSweepIntervalSeconds=30
 ```
 
-The default CORS origin list is empty, so cross-origin requests are denied until trusted origins are configured. Plain HTTP origins are accepted only for loopback development hosts.
+The base CORS origin list contains only the non-resolving WebView2 virtual host `https://desktop.vendome.invalid`. Add each real website origin explicitly through deployment configuration. Plain HTTP website origins are accepted only for loopback development hosts.
 
 The base settings intentionally contain empty database and JWT secrets. The Development profile contains a credential-free Windows LocalDB setting; replace it with user secrets or environment variables when using another SQL Server. Do not commit deployment credentials or signing keys.
 
@@ -136,6 +210,12 @@ dotnet build VendomeJewleryInvoiceManagement.sln --configuration Release --no-re
 dotnet test VendomeJewleryInvoiceManagement.sln --configuration Release --no-build
 ```
 
+On Windows, the non-destructive Phase 7B verification sequence is bundled as:
+
+```powershell
+.\scripts\verify-phase7b.ps1
+```
+
 Architecture decisions are recorded in:
 
 - [`docs/architecture/phase-1-foundation.md`](docs/architecture/phase-1-foundation.md)
@@ -144,4 +224,7 @@ Architecture decisions are recorded in:
 - [`docs/architecture/phase-4-catalog-pricing-inventory.md`](docs/architecture/phase-4-catalog-pricing-inventory.md)
 - [`docs/architecture/phase-5-orders-payments-invoices.md`](docs/architecture/phase-5-orders-payments-invoices.md)
 - [`docs/architecture/phase-6-worker-outbox-signalr.md`](docs/architecture/phase-6-worker-outbox-signalr.md)
+- [`docs/architecture/phase-7a-desktop-client-integration.md`](docs/architecture/phase-7a-desktop-client-integration.md)
+- [`docs/architecture/phase-7b-operational-pages.md`](docs/architecture/phase-7b-operational-pages.md)
+- [`docs/architecture/phase-7c-invoice-documents.md`](docs/architecture/phase-7c-invoice-documents.md)
 - [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md)

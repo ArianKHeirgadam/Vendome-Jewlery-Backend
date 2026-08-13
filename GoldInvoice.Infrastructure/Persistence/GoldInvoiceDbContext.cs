@@ -1,4 +1,5 @@
 using GoldInvoice.Domain.Catalog;
+using GoldInvoice.Domain.Business;
 using GoldInvoice.Domain.Customers;
 using GoldInvoice.Domain.Inventory;
 using GoldInvoice.Domain.Invoicing;
@@ -71,6 +72,12 @@ public sealed class GoldInvoiceDbContext(
     public DbSet<InventoryUnit> InventoryUnits => Set<InventoryUnit>();
 
     public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
+
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
+
+    public DbSet<SupplierPurchase> SupplierPurchases => Set<SupplierPurchase>();
+
+    public DbSet<CustomerInteraction> CustomerInteractions => Set<CustomerInteraction>();
 
     public DbSet<Order> Orders => Set<Order>();
 

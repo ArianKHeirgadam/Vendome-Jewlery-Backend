@@ -1,0 +1,12 @@
+diff --git a/GoldInvoice.Infrastructure/Integration/OutboxServices.cs b/GoldInvoice.Infrastructure/Integration/OutboxServices.cs
+--- a/GoldInvoice.Infrastructure/Integration/OutboxServices.cs
++++ b/GoldInvoice.Infrastructure/Integration/OutboxServices.cs
+@@ -254,7 +254,7 @@ public sealed partial class OutboxDispatcher(
+                 var permanent = exception is PermanentIntegrationEventException;
+                 var deadLetter = permanent || claim.RetryCount + 1 >= settings.MaximumAttempts;
+                 var failedAt = timeProvider.GetUtcNow();
+-                var nextRetryAt = deadLetter
++                DateTimeOffset? nextRetryAt = deadLetter
+                     ? null
+                     : failedAt.Add(CalculateBackoff(claim.RetryCount, settings));
+                 await FailAsync(

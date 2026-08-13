@@ -337,6 +337,13 @@ internal sealed class CatalogService(GoldInvoiceDbContext dbContext) : ICatalogS
             .AsNoTracking()
             .Where(detail => variantIds.Contains(detail.ProductVariantId))
             .ToDictionaryAsync(detail => detail.ProductVariantId, cancellationToken);
+        var images = await dbContext.ProductImages
+            .AsNoTracking()
+            .Where(image => productIds.Contains(image.ProductId))
+            .OrderByDescending(image => image.IsPrimary)
+            .ThenBy(image => image.SortOrder)
+            .ThenBy(image => image.Id)
+            .ToListAsync(cancellationToken);
 
         return products.Select(product => new ProductInfo(
                 product.Id,
@@ -350,6 +357,10 @@ internal sealed class CatalogService(GoldInvoiceDbContext dbContext) : ICatalogS
                     .Select(variant => MapVariant(
                         variant,
                         details.TryGetValue(variant.Id, out var detail) ? detail : null))
+                    .ToArray(),
+                images
+                    .Where(image => image.ProductId == product.Id)
+                    .Select(MapImage)
                     .ToArray(),
                 EncodeRowVersion(product.RowVersion)))
             .ToArray();
@@ -401,6 +412,16 @@ internal sealed class CatalogService(GoldInvoiceDbContext dbContext) : ICatalogS
                 detail.IsWeightVariable,
                 EncodeRowVersion(detail.RowVersion)),
         EncodeRowVersion(variant.RowVersion));
+
+    private static ProductImageInfo MapImage(ProductImage image) => new(
+        image.Id,
+        image.ProductId,
+        image.ProductVariantId,
+        image.ContentType,
+        image.AltText,
+        image.SortOrder,
+        image.IsPrimary,
+        EncodeRowVersion(image.RowVersion));
 
     private void SetOriginalRowVersion<TEntity>(TEntity entity, string value)
         where TEntity : class =>

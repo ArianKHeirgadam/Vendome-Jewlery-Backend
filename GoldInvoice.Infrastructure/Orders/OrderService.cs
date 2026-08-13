@@ -84,6 +84,15 @@ internal sealed class OrderService(
         ArgumentNullException.ThrowIfNull(command);
         ValidateCreateCommand(command);
         EnsureCustomerAccess(command.ActorUserId, command.CustomerId, command.CanManageOrders);
+        StoreProfileInfo store;
+        try
+        {
+            store = await storeProfileService.GetAsync(cancellationToken);
+        }
+        catch (ApplicationResourceNotFoundException)
+        {
+            throw new StoreProfileNotConfiguredException();
+        }
         var idempotencyKey = PersistenceUtilities.NormalizeIdempotencyKey(command.IdempotencyKey);
         var scope = $"Orders.Create:{command.ActorUserId:N}";
         var keyHash = PersistenceUtilities.Hash(idempotencyKey);
@@ -131,8 +140,6 @@ internal sealed class OrderService(
                 candidate => candidate.Id == command.CustomerAddressId &&
                     candidate.CustomerId == command.CustomerId,
                 cancellationToken) ?? throw new ApplicationResourceNotFoundException();
-        var store = await storeProfileService.GetAsync(cancellationToken);
-
         var itemIds = command.Lines.Select(line => line.InventoryItemId).Distinct().ToArray();
         var items = await dbContext.InventoryItems
             .Where(item => itemIds.Contains(item.Id))
@@ -308,7 +315,11 @@ internal sealed class OrderService(
                 draft.Price.WageRials,
                 draft.Price.ProfitRials,
                 draft.Price.TaxRials,
-                draft.Price.RoundingPolicy);
+                draft.Price.RoundingPolicy,
+                draft.InventoryUnit?.AcquisitionCostRials ??
+                    (draft.InventoryItem.HasAcquisitionCost
+                        ? draft.InventoryItem.AverageUnitCostRials
+                        : null));
             dbContext.OrderItems.Add(item);
             reservationCoordinator.Reserve(
                 item,
@@ -511,6 +522,9 @@ internal sealed class OrderService(
         item.TaxRials,
         item.UnitPriceRials,
         item.LineTotalRials,
+        item.AcquisitionUnitCostRials,
+        item.AcquisitionTotalCostRials,
+        item.GrossProfitRials,
         item.RoundingPolicy);
 
     private static OrderAddressSnapshotInfo MapAddress(OrderAddressSnapshot address) => new(

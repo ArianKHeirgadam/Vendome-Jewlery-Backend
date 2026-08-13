@@ -35,11 +35,13 @@ internal sealed class InventoryItemConfiguration : IEntityTypeConfiguration<Inve
         {
             table.HasCheckConstraint("CK_InventoryItems_OnHand", "[QuantityOnHand] >= 0");
             table.HasCheckConstraint("CK_InventoryItems_Reserved", "[QuantityReserved] >= 0");
+            table.HasCheckConstraint("CK_InventoryItems_AverageCost", "[AverageUnitCostRials] >= 0");
             table.HasCheckConstraint(
                 "CK_InventoryItems_Available",
                 "[QuantityReserved] <= [QuantityOnHand]");
         });
         builder.ConfigureAuditable();
+        builder.Property(item => item.HasAcquisitionCost).HasDefaultValue(false);
         builder.HasIndex(item => new { item.WarehouseId, item.ProductVariantId }).IsUnique();
         builder.HasIndex(item => new { item.ProductVariantId, item.QuantityOnHand });
         builder.HasAlternateKey(item => new { item.Id, item.WarehouseId, item.ProductVariantId });

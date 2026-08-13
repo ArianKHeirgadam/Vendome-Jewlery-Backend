@@ -1,10 +1,13 @@
+using System.Text.Json;
 using GoldInvoice.Application.Common;
 using GoldInvoice.Application.Invoicing;
 using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Orders;
+using GoldInvoice.Application.Security;
 using GoldInvoice.Domain.Invoicing;
 using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Payments;
+using GoldInvoice.Domain.Platform;
 using GoldInvoice.Infrastructure.Configuration;
 using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Orders;
@@ -93,6 +96,188 @@ internal sealed class InvoiceService(
         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
         return await GetInvoiceAsync(invoice.Id, command.ActorUserId, canReadAll: true, cancellationToken);
+    }
+
+    public async Task<InvoiceInfo> CorrectDocumentAsync(
+        Guid invoiceId,
+        CorrectInvoiceDocumentCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ValidateActor(command.ActorUserId);
+        if (string.IsNullOrWhiteSpace(command.Reason) || command.Reason.Trim().Length > 1000)
+        {
+            throw new ArgumentException("A bounded correction reason is required.", nameof(command));
+        }
+
+        await using var transaction = await PersistenceUtilities.BeginSerializableTransactionAsync(
+            dbContext,
+            cancellationToken);
+        var invoice = await dbContext.Invoices.FindAsync([invoiceId], cancellationToken) ??
+            throw new ApplicationResourceNotFoundException();
+        var address = await dbContext.InvoiceAddressSnapshots.SingleOrDefaultAsync(
+            candidate => candidate.InvoiceId == invoice.Id,
+            cancellationToken) ?? throw new ApplicationConflictException();
+        if (invoice.Status != InvoiceStatus.Issued || invoice.PaymentId is null)
+        {
+            throw new ApplicationConflictException();
+        }
+
+        var paymentIsVerified = await dbContext.Payments.AnyAsync(
+            payment => payment.Id == invoice.PaymentId &&
+                       payment.OrderId == invoice.OrderId &&
+                       payment.Status == PaymentStatus.Verified,
+            cancellationToken);
+        var orderIsPaid = await dbContext.Orders.AnyAsync(
+            order => order.Id == invoice.OrderId &&
+                     order.CustomerId == invoice.CustomerId &&
+                     (order.Status == OrderStatus.Paid ||
+                      order.Status == OrderStatus.Processing ||
+                      order.Status == OrderStatus.Completed),
+            cancellationToken);
+        if (!paymentIsVerified || !orderIsPaid)
+        {
+            throw new ApplicationConflictException();
+        }
+
+        PersistenceUtilities.SetOriginalRowVersion(dbContext, invoice, command.RowVersion);
+        var oldValues = JsonSerializer.Serialize(new
+        {
+            invoice.CustomerNameSnapshot,
+            invoice.CustomerNationalIdSnapshot,
+            address.RecipientName,
+            address.PhoneNumber,
+            address.Province,
+            address.City,
+            address.PostalCode,
+            address.AddressLine
+        });
+        invoice.CorrectCustomerSnapshot(command.CustomerName, command.CustomerNationalId);
+        address.Correct(
+            command.RecipientName,
+            command.PhoneNumber,
+            command.Province,
+            command.City,
+            command.PostalCode,
+            command.AddressLine);
+        var newValues = JsonSerializer.Serialize(new
+        {
+            invoice.CustomerNameSnapshot,
+            invoice.CustomerNationalIdSnapshot,
+            address.RecipientName,
+            address.PhoneNumber,
+            address.Province,
+            address.City,
+            address.PostalCode,
+            address.AddressLine,
+            CorrectionReason = command.Reason
+        });
+        var audit = new AuditLog(
+            "InvoiceDocumentCorrected",
+            nameof(Invoice),
+            invoice.Id.ToString("N"),
+            timeProvider.GetUtcNow());
+        audit.SetContext(command.ActorUserId, correlationId: null);
+        audit.SetValues(oldValues, newValues);
+        dbContext.AuditLogs.Add(audit);
+
+        await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+        await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+        return await GetInvoiceAsync(invoice.Id, command.ActorUserId, canReadAll: true, cancellationToken);
+    }
+
+    public async Task<InvoicePrintInfo> RequestPrintAsync(
+        Guid invoiceId,
+        RequestInvoicePrintCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ValidateActor(command.ActorUserId);
+        await using var transaction = await PersistenceUtilities.BeginSerializableTransactionAsync(
+            dbContext,
+            cancellationToken);
+        var invoice = await dbContext.Invoices
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == invoiceId, cancellationToken) ??
+            throw new ApplicationResourceNotFoundException();
+        if (invoice.Status != InvoiceStatus.Issued || invoice.PaymentId is null ||
+            !await dbContext.Payments.AnyAsync(
+                payment => payment.Id == invoice.PaymentId &&
+                           payment.OrderId == invoice.OrderId &&
+                           payment.Status == PaymentStatus.Verified,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException();
+        }
+
+        var requestedAt = timeProvider.GetUtcNow();
+        var previousPrints = await dbContext.InvoicePrintLogs
+            .Where(log => log.InvoiceId == invoice.Id)
+            .ToListAsync(cancellationToken);
+        var acknowledgementDeadline = requestedAt.AddMinutes(-5);
+        if (previousPrints.Any(log =>
+                log.Status == InvoicePrintStatus.Requested &&
+                log.CreatedAt >= acknowledgementDeadline))
+        {
+            throw new ApplicationConflictException();
+        }
+
+        foreach (var stalePrint in previousPrints.Where(log =>
+                     log.Status == InvoicePrintStatus.Requested))
+        {
+            stalePrint.MarkFailed(requestedAt, "PRINT_ACK_TIMEOUT");
+        }
+
+        var isReprint = previousPrints.Any(log => log.Status == InvoicePrintStatus.Succeeded);
+        if (isReprint && !command.CanReprint)
+        {
+            throw new SecurityAccessDeniedException();
+        }
+
+        var printLog = new InvoicePrintLog(
+            invoice.Id,
+            command.ActorUserId,
+            command.Copies,
+            isReprint,
+            isReprint ? command.ReprintReason : null);
+        dbContext.InvoicePrintLogs.Add(printLog);
+        await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+        await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+        return MapPrint(printLog);
+    }
+
+    public async Task<InvoicePrintInfo> CompletePrintAsync(
+        Guid invoiceId,
+        Guid printJobId,
+        CompleteInvoicePrintCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ValidateActor(command.ActorUserId);
+        await using var transaction = await PersistenceUtilities.BeginSerializableTransactionAsync(
+            dbContext,
+            cancellationToken);
+        var printLog = await dbContext.InvoicePrintLogs.SingleOrDefaultAsync(
+            candidate => candidate.Id == printJobId && candidate.InvoiceId == invoiceId,
+            cancellationToken) ?? throw new ApplicationResourceNotFoundException();
+        if (printLog.RequestedByUserId != command.ActorUserId)
+        {
+            throw new SecurityAccessDeniedException();
+        }
+
+        PersistenceUtilities.SetOriginalRowVersion(dbContext, printLog, command.RowVersion);
+        if (command.Succeeded)
+        {
+            printLog.MarkSucceeded(timeProvider.GetUtcNow(), command.PrinterName);
+        }
+        else
+        {
+            printLog.MarkFailed(timeProvider.GetUtcNow(), command.FailureCode ?? string.Empty);
+        }
+
+        await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+        await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+        return MapPrint(printLog);
     }
 
     public async Task<InvoiceInfo> IssueForPaidOrderAsync(
@@ -232,7 +417,8 @@ internal sealed class InvoiceService(
                 orderItem.WageRials,
                 orderItem.ProfitRials,
                 orderItem.TaxRials,
-                orderItem.RoundingPolicy));
+                orderItem.RoundingPolicy,
+                orderItem.AcquisitionUnitCostRials));
         }
 
         dbContext.InvoiceAddressSnapshots.Add(new InvoiceAddressSnapshot(
@@ -328,6 +514,9 @@ internal sealed class InvoiceService(
         item.TaxRials,
         item.UnitPriceRials,
         item.LineTotalRials,
+        item.AcquisitionUnitCostRials,
+        item.AcquisitionTotalCostRials,
+        item.GrossProfitRials,
         item.RoundingPolicy);
 
     private static InvoiceAddressSnapshotInfo MapAddress(InvoiceAddressSnapshot address) => new(
@@ -350,6 +539,20 @@ internal sealed class InvoiceService(
         store.PhoneNumber,
         store.PostalCode,
         store.AddressLine);
+
+    private static InvoicePrintInfo MapPrint(InvoicePrintLog log) => new(
+        log.Id,
+        log.InvoiceId,
+        log.RequestedByUserId,
+        log.Status,
+        log.Copies,
+        log.IsReprint,
+        log.ReprintReason,
+        log.PrinterName,
+        log.CompletedAt,
+        log.FailureCode,
+        log.CreatedAt,
+        Convert.ToBase64String(log.RowVersion));
 
     private static void ValidateActor(Guid actorUserId)
     {

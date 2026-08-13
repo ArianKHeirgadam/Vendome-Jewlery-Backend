@@ -1,14 +1,17 @@
 using GoldInvoice.Application.Catalog;
+using GoldInvoice.Application.Business;
 using GoldInvoice.Application.Customers;
 using GoldInvoice.Application.Inventory;
 using GoldInvoice.Application.Invoicing;
 using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Orders;
 using GoldInvoice.Application.Payments;
+using GoldInvoice.Application.People;
 using GoldInvoice.Application.Pricing;
 using GoldInvoice.Application.Security;
 using GoldInvoice.Application.Settings;
 using GoldInvoice.Infrastructure.Catalog;
+using GoldInvoice.Infrastructure.Business;
 using GoldInvoice.Infrastructure.Configuration;
 using GoldInvoice.Infrastructure.Customers;
 using GoldInvoice.Infrastructure.Identity;
@@ -17,6 +20,7 @@ using GoldInvoice.Infrastructure.Invoicing;
 using GoldInvoice.Infrastructure.Integration;
 using GoldInvoice.Infrastructure.Orders;
 using GoldInvoice.Infrastructure.Payments;
+using GoldInvoice.Infrastructure.People;
 using GoldInvoice.Infrastructure.Persistence;
 using GoldInvoice.Infrastructure.Persistence.Interceptors;
 using GoldInvoice.Infrastructure.Pricing;
@@ -75,6 +79,9 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(OutboxOptions.SectionName))
             .Validate(OutboxOptions.IsValid, "Outbox settings are invalid.")
             .ValidateOnStart();
+        services
+            .AddOptions<ProductImageStorageOptions>()
+            .Bind(configuration.GetSection(ProductImageStorageOptions.SectionName));
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddHttpContextAccessor();
@@ -99,11 +106,16 @@ public static class DependencyInjection
                 tags: ["ready"]);
 
         services.AddScoped<ICatalogService, CatalogService>();
+        services.AddSingleton<IProductImageStorage, LocalProductImageStorage>();
+        services.AddScoped<IProductImageService, ProductImageService>();
         services.AddScoped<IProductPricingService, ProductPricingService>();
         services.AddScoped<IMarketPriceIngestionService, MarketPriceIngestionService>();
         services.AddScoped<IInventoryService, InventoryService>();
+        services.AddScoped<ISupplierPurchaseService, SupplierPurchaseService>();
         services.AddScoped<InventoryReservationCoordinator>();
         services.AddScoped<ICustomerAddressService, CustomerAddressService>();
+        services.AddScoped<ISupplierService, SupplierService>();
+        services.AddScoped<ICustomerInteractionService, CustomerInteractionService>();
         services.AddScoped<IStoreProfileService, StoreProfileService>();
         services.AddScoped<IOrderService, OrderService>();
         services.AddScoped<InvoiceService>();
@@ -165,11 +177,14 @@ public static class DependencyInjection
                 options.Lockout.MaxFailedAccessAttempts = securitySettings.MaxFailedAccessAttempts;
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(securitySettings.LockoutMinutes);
                 options.SignIn.RequireConfirmedEmail = true;
-                options.User.RequireUniqueEmail = true;
+                // Customer accounts use a verified phone number instead of an email address.
+                // OptionalEmailUserValidator still validates and de-duplicates every supplied email.
+                options.User.RequireUniqueEmail = false;
             })
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<GoldInvoiceDbContext>()
             .AddUserStore<ProtectedIdentityUserStore>()
+            .AddUserValidator<OptionalEmailUserValidator>()
             .AddSignInManager()
             .AddDefaultTokenProviders();
 
@@ -190,6 +205,7 @@ public static class DependencyInjection
         services.AddScoped<ISecurityTokenService, SecurityTokenService>();
         services.AddScoped<IAccountAuthenticationService, AccountAuthenticationService>();
         services.AddScoped<IAccessTokenPrincipalValidator, AccessTokenPrincipalValidator>();
+        services.AddScoped<IPeopleDirectoryService, PeopleDirectoryService>();
         services.AddHostedService<SecurityBootstrapHostedService>();
 
         return services;

@@ -24,6 +24,7 @@ internal sealed class PaymentService(
     TimeProvider timeProvider,
     ILogger<PaymentService> logger) : IPaymentService
 {
+    private const int MaximumPageSize = 100;
     private readonly IReadOnlyList<IPaymentGatewayProvider> registeredProviders = providers.ToArray();
 
     public async Task<IReadOnlyList<PaymentGatewayInfo>> GetGatewaysAsync(
@@ -148,6 +149,47 @@ internal sealed class PaymentService(
         }
 
         return await MapPaymentAsync(payment, cancellationToken);
+    }
+
+    public async Task<PagedResult<PaymentInfo>> GetPaymentsAsync(
+        Guid actorUserId,
+        bool canReadAll,
+        int page,
+        int pageSize,
+        PaymentStatus? status,
+        CancellationToken cancellationToken)
+    {
+        ValidateActor(actorUserId);
+        if (page < 1 || pageSize is < 1 or > MaximumPageSize)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        }
+
+        var query =
+            from payment in dbContext.Payments.AsNoTracking()
+            join order in dbContext.Orders.AsNoTracking()
+                on payment.OrderId equals order.Id
+            where canReadAll || order.CustomerId == actorUserId
+            select payment;
+        if (status is not null)
+        {
+            query = query.Where(payment => payment.Status == status);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var payments = await query
+            .OrderByDescending(payment => payment.CreatedAt)
+            .ThenByDescending(payment => payment.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+        var mapped = new List<PaymentInfo>(payments.Count);
+        foreach (var payment in payments)
+        {
+            mapped.Add(await MapPaymentAsync(payment, cancellationToken));
+        }
+
+        return new PagedResult<PaymentInfo>(mapped, page, pageSize, totalCount);
     }
 
     public async Task<PaymentInitiationInfo> InitiateAsync(

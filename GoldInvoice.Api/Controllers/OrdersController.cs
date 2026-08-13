@@ -162,6 +162,9 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
             TaxRials = item.TaxRials,
             UnitPriceRials = item.UnitPriceRials,
             LineTotalRials = item.LineTotalRials,
+            AcquisitionUnitCostRials = item.AcquisitionUnitCostRials,
+            AcquisitionTotalCostRials = item.AcquisitionTotalCostRials,
+            GrossProfitRials = item.GrossProfitRials,
             RoundingPolicy = item.RoundingPolicy
         }).ToArray(),
         RowVersion = order.RowVersion

@@ -12,7 +12,9 @@ namespace GoldInvoice.Api.Controllers;
 [Authorize]
 [RequestSizeLimit(64 * 1024)]
 [Route("api/v1/catalog")]
-public sealed class CatalogController(ICatalogService catalogService) : ControllerBase
+public sealed class CatalogController(
+    ICatalogService catalogService,
+    IProductImageService productImageService) : ControllerBase
 {
     [Authorize(Policy = SecurityPermissions.ProductsRead)]
     [HttpGet("categories")]
@@ -139,6 +141,42 @@ public sealed class CatalogController(ICatalogService catalogService) : Controll
             cancellationToken)));
 
     [Authorize(Policy = SecurityPermissions.ProductsManage)]
+    [HttpPut("products/{productId:guid}/image")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(6 * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 6 * 1024 * 1024)]
+    public async Task<ActionResult<ProductImageResponse>> SetProductImage(
+        Guid productId,
+        [FromForm] IFormFile file,
+        [FromForm] string? altText,
+        CancellationToken cancellationToken)
+    {
+        if (file.Length is < 1 or > 5 * 1024 * 1024)
+        {
+            return ValidationProblem("حجم تصویر باید بین ۱ بایت تا ۵ مگابایت باشد.");
+        }
+
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        return Ok(MapImage(await productImageService.SetPrimaryImageAsync(
+            productId,
+            new SetPrimaryProductImageCommand(buffer.ToArray(), file.ContentType, altText),
+            cancellationToken)));
+    }
+
+    [Authorize(Policy = SecurityPermissions.ProductsRead)]
+    [HttpGet("products/{productId:guid}/images/{imageId:guid}")]
+    public async Task<IActionResult> GetProductImage(
+        Guid productId,
+        Guid imageId,
+        CancellationToken cancellationToken)
+    {
+        var image = await productImageService.GetContentAsync(productId, imageId, cancellationToken);
+        return File(image.Content, image.ContentType);
+    }
+
+    [Authorize(Policy = SecurityPermissions.ProductsManage)]
     [HttpPost("products/{productId:guid}/variants")]
     public async Task<ActionResult<ProductVariantResponse>> CreateVariant(
         Guid productId,
@@ -215,7 +253,20 @@ public sealed class CatalogController(ICatalogService catalogService) : Controll
         Description = product.Description,
         IsActive = product.IsActive,
         Variants = product.Variants.Select(MapVariant).ToArray(),
+        Images = product.Images.Select(MapImage).ToArray(),
         RowVersion = product.RowVersion
+    };
+
+    private static ProductImageResponse MapImage(ProductImageInfo image) => new()
+    {
+        Id = image.Id,
+        ProductId = image.ProductId,
+        ProductVariantId = image.ProductVariantId,
+        ContentType = image.ContentType,
+        AltText = image.AltText,
+        SortOrder = image.SortOrder,
+        IsPrimary = image.IsPrimary,
+        RowVersion = image.RowVersion
     };
 
     private static ProductVariantResponse MapVariant(ProductVariantInfo variant) => new()

@@ -8,7 +8,7 @@ public sealed record RequestSecurityContext(
     string? CorrelationId);
 
 public sealed record SignInCommand(
-    string Email,
+    string Identifier,
     string Password,
     string? AuthenticatorCode,
     string? RecoveryCode);

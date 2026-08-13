@@ -11,7 +11,9 @@ namespace GoldInvoice.Api.Controllers;
 [Authorize]
 [RequestSizeLimit(32 * 1024)]
 [Route("api/v1/inventory")]
-public sealed class InventoryController(IInventoryService inventoryService) : ControllerBase
+public sealed class InventoryController(
+    IInventoryService inventoryService,
+    ISupplierPurchaseService supplierPurchaseService) : ControllerBase
 {
     [Authorize(Policy = SecurityPermissions.InventoryRead)]
     [HttpGet("warehouses")]
@@ -60,11 +62,78 @@ public sealed class InventoryController(IInventoryService inventoryService) : Co
             cancellationToken)));
 
     [Authorize(Policy = SecurityPermissions.InventoryRead)]
+    [HttpGet("items")]
+    public async Task<ActionResult<PagedResponse<InventoryItemResponse>>> GetInventoryItems(
+        [FromQuery] Guid? warehouseId = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await inventoryService.GetInventoryItemsAsync(
+            warehouseId,
+            page,
+            pageSize,
+            cancellationToken);
+        return Ok(new PagedResponse<InventoryItemResponse>
+        {
+            Items = result.Items.Select(MapItem).ToArray(),
+            Page = result.Page,
+            PageSize = result.PageSize,
+            TotalCount = result.TotalCount
+        });
+    }
+
+    [Authorize(Policy = SecurityPermissions.InventoryRead)]
     [HttpGet("items/{inventoryItemId:guid}")]
     public async Task<ActionResult<InventoryItemResponse>> GetInventoryItem(
         Guid inventoryItemId,
         CancellationToken cancellationToken) =>
         Ok(MapItem(await inventoryService.GetInventoryItemAsync(inventoryItemId, cancellationToken)));
+
+    [Authorize(Policy = SecurityPermissions.SuppliersRead)]
+    [Authorize(Policy = SecurityPermissions.InventoryRead)]
+    [HttpGet("supplier-purchases")]
+    public async Task<ActionResult<PagedResponse<SupplierPurchaseResponse>>> GetSupplierPurchases(
+        [FromQuery] Guid? supplierId = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await supplierPurchaseService.GetPurchasesAsync(
+            page,
+            pageSize,
+            supplierId,
+            cancellationToken);
+        return Ok(new PagedResponse<SupplierPurchaseResponse>
+        {
+            Items = result.Items.Select(MapPurchase).ToArray(),
+            Page = result.Page,
+            PageSize = result.PageSize,
+            TotalCount = result.TotalCount
+        });
+    }
+
+    [Authorize(Policy = SecurityPermissions.SuppliersManage)]
+    [Authorize(Policy = SecurityPermissions.InventoryAdjust)]
+    [HttpPost("supplier-purchases")]
+    public async Task<ActionResult<SupplierPurchaseResponse>> RecordSupplierPurchase(
+        RecordSupplierPurchaseRequest request,
+        CancellationToken cancellationToken)
+    {
+        var purchase = await supplierPurchaseService.RecordPurchaseAsync(
+            new RecordSupplierPurchaseCommand(
+                request.SupplierId,
+                request.WarehouseId,
+                request.ProductVariantId,
+                request.Quantity,
+                request.UnitCostRials,
+                request.SellingUnitPriceRials,
+                request.PurchasedAt,
+                request.SupplierReference,
+                request.Notes),
+            cancellationToken);
+        return Created($"/api/v1/inventory/supplier-purchases/{purchase.Id:D}", MapPurchase(purchase));
+    }
 
     [Authorize(Policy = SecurityPermissions.InventoryRead)]
     [HttpGet("units/{inventoryUnitId:guid}")]
@@ -233,7 +302,33 @@ public sealed class InventoryController(IInventoryService inventoryService) : Co
         QuantityOnHand = item.QuantityOnHand,
         QuantityReserved = item.QuantityReserved,
         QuantityAvailable = item.QuantityAvailable,
+        AverageUnitCostRials = item.AverageUnitCostRials,
+        HasAcquisitionCost = item.HasAcquisitionCost,
         RowVersion = item.RowVersion
+    };
+
+    private static SupplierPurchaseResponse MapPurchase(SupplierPurchaseInfo purchase) => new()
+    {
+        Id = purchase.Id,
+        PurchaseNumber = purchase.PurchaseNumber,
+        SupplierId = purchase.SupplierId,
+        SupplierName = purchase.SupplierName,
+        WarehouseId = purchase.WarehouseId,
+        WarehouseName = purchase.WarehouseName,
+        ProductVariantId = purchase.ProductVariantId,
+        ProductName = purchase.ProductName,
+        VariantName = purchase.VariantName,
+        Sku = purchase.Sku,
+        InventoryItemId = purchase.InventoryItemId,
+        Quantity = purchase.Quantity,
+        UnitCostRials = purchase.UnitCostRials,
+        TotalCostRials = purchase.TotalCostRials,
+        SellingUnitPriceRials = purchase.SellingUnitPriceRials,
+        ExpectedUnitProfitRials = purchase.ExpectedUnitProfitRials,
+        ExpectedTotalProfitRials = purchase.ExpectedTotalProfitRials,
+        PurchasedAt = purchase.PurchasedAt,
+        SupplierReference = purchase.SupplierReference,
+        Notes = purchase.Notes
     };
 
     private static WarehouseResponse MapWarehouse(WarehouseInfo warehouse) => new()

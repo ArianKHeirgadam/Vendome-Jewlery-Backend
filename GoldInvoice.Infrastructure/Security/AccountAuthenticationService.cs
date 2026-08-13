@@ -44,9 +44,17 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var email = command.Email.Trim();
-        var identifierHash = SecurityHashing.Sha256(userManager.NormalizeEmail(email) ?? email.ToUpperInvariant());
-        var user = await userManager.FindByEmailAsync(email);
+        var identifier = command.Identifier.Trim();
+        var isPhoneNumber = ContactIdentifierNormalizer.TryNormalizePhoneNumber(
+            identifier,
+            out var normalizedPhoneNumber);
+        var normalizedIdentifier = isPhoneNumber
+            ? userManager.NormalizeName(normalizedPhoneNumber) ?? normalizedPhoneNumber
+            : userManager.NormalizeEmail(identifier) ?? identifier.ToUpperInvariant();
+        var identifierHash = SecurityHashing.Sha256(normalizedIdentifier);
+        var user = isPhoneNumber
+            ? await userManager.FindByNameAsync(normalizedPhoneNumber)
+            : await userManager.FindByEmailAsync(identifier);
 
         if (user is null)
         {
@@ -89,7 +97,7 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
             throw new AuthenticationRejectedException();
         }
 
-        if (!user.IsActive || !user.EmailConfirmed)
+        if (!user.IsActive || !IsContactConfirmed(user))
         {
             await RecordLoginAttemptAsync(
                 identifierHash,
@@ -204,7 +212,7 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
                 throw new AuthenticationRejectedException();
             }
 
-            if (user is null || session is null || !user.IsActive || !user.EmailConfirmed ||
+            if (user is null || session is null || !user.IsActive || !IsContactConfirmed(user) ||
                 !currentToken.IsActiveAt(now) || !session.IsActiveAt(now) ||
                 string.IsNullOrWhiteSpace(user.SecurityStamp) ||
                 !SecurityHashing.FixedTimeEquals(session.SecurityStamp, user.SecurityStamp))
@@ -457,7 +465,7 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
             user.Id,
             user.Email ?? string.Empty,
             user.DisplayName,
-            user.EmailConfirmed,
+            IsContactConfirmed(user),
             user.TwoFactorEnabled,
             access.Roles,
             access.Permissions,
@@ -534,7 +542,7 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
 
         cancellationToken.ThrowIfCancellationRequested();
         var user = await userManager.FindByIdAsync(userId.ToString("D"));
-        if (user is null || !user.IsActive || !user.EmailConfirmed || user.TwoFactorEnabled ||
+        if (user is null || !user.IsActive || !IsContactConfirmed(user) || user.TwoFactorEnabled ||
             string.IsNullOrWhiteSpace(user.SecurityStamp) ||
             !SecurityHashing.FixedTimeEquals(stampHash, SecurityHashing.Sha256(user.SecurityStamp)))
         {
@@ -552,6 +560,10 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
 
         return user;
     }
+
+    private static bool IsContactConfirmed(ApplicationUser user) =>
+        (!string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed) ||
+        (!string.IsNullOrWhiteSpace(user.PhoneNumber) && user.PhoneNumberConfirmed);
 
     private async Task<bool> VerifySecondFactorAsync(
         ApplicationUser user,

@@ -387,4 +387,24 @@ public sealed class ProductImage : SoftDeletableEntity
     public int SortOrder { get; private set; }
 
     public bool IsPrimary { get; private set; }
+
+    public void Configure(Guid? productVariantId, string? altText, int sortOrder, bool isPrimary)
+    {
+        if (productVariantId == Guid.Empty)
+        {
+            throw new ArgumentException("A non-empty variant identifier is required.", nameof(productVariantId));
+        }
+
+        Guard.AgainstNegative(sortOrder, nameof(sortOrder));
+        ProductVariantId = productVariantId;
+        AltText = Guard.Optional(altText, nameof(altText), 300);
+        SortOrder = sortOrder;
+        IsPrimary = isPrimary;
+    }
+
+    public void ReplaceContent(string storageKey, string contentType)
+    {
+        StorageKey = Guard.Required(storageKey, nameof(storageKey), 500);
+        ContentType = Guard.Required(contentType, nameof(contentType), 100).ToLowerInvariant();
+    }
 }

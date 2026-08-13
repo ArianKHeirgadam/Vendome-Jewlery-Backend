@@ -175,7 +175,8 @@ public sealed class OrderItem : AuditableEntity, IAppendOnlyEntity, IProtectedFr
         long? wageRials = null,
         long? profitRials = null,
         long? taxRials = null,
-        string? roundingPolicy = null)
+        string? roundingPolicy = null,
+        long? acquisitionUnitCostRials = null)
     {
         Guard.AgainstEmpty(orderId, nameof(orderId));
         Guard.AgainstEmpty(productVariantId, nameof(productVariantId));
@@ -184,6 +185,10 @@ public sealed class OrderItem : AuditableEntity, IAppendOnlyEntity, IProtectedFr
         Guard.AgainstOutOfRange(purity, 1, 1000, nameof(purity));
         Guard.AgainstNegative(unitPriceRials, nameof(unitPriceRials));
         Guard.AgainstNonPositive(quantity, nameof(quantity));
+        if (acquisitionUnitCostRials is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(acquisitionUnitCostRials));
+        }
         ValidatePhaseFiveSnapshot(
             priceCalculationSnapshotId,
             inventoryItemId,
@@ -210,6 +215,13 @@ public sealed class OrderItem : AuditableEntity, IAppendOnlyEntity, IProtectedFr
         UnitPriceRials = unitPriceRials;
         Quantity = quantity;
         LineTotalRials = checked(unitPriceRials * quantity);
+        AcquisitionUnitCostRials = acquisitionUnitCostRials;
+        AcquisitionTotalCostRials = acquisitionUnitCostRials is null
+            ? null
+            : checked(acquisitionUnitCostRials.Value * quantity);
+        GrossProfitRials = AcquisitionTotalCostRials is null
+            ? null
+            : checked(LineTotalRials - AcquisitionTotalCostRials.Value);
         PriceCalculationSnapshotId = priceCalculationSnapshotId;
         InventoryItemId = inventoryItemId;
         InventoryUnitId = inventoryUnitId;
@@ -264,6 +276,12 @@ public sealed class OrderItem : AuditableEntity, IAppendOnlyEntity, IProtectedFr
     public int Quantity { get; private set; }
 
     public long LineTotalRials { get; private set; }
+
+    public long? AcquisitionUnitCostRials { get; private set; }
+
+    public long? AcquisitionTotalCostRials { get; private set; }
+
+    public long? GrossProfitRials { get; private set; }
 
     public string? RoundingPolicy { get; private set; }
 

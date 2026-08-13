@@ -81,6 +81,34 @@ internal sealed class InventoryService(
         return MapInventoryItem(item);
     }
 
+    public async Task<PagedResult<InventoryItemInfo>> GetInventoryItemsAsync(
+        Guid? warehouseId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        ValidatePagination(page, pageSize);
+        var query = dbContext.InventoryItems.AsNoTracking();
+        if (warehouseId is not null)
+        {
+            query = query.Where(item => item.WarehouseId == warehouseId);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
+            .OrderBy(item => item.WarehouseId)
+            .ThenBy(item => item.ProductVariantId)
+            .ThenBy(item => item.Id)
+            .Skip(CalculateSkip(page, pageSize))
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+        return new PagedResult<InventoryItemInfo>(
+            items.Select(MapInventoryItem).ToArray(),
+            page,
+            pageSize,
+            totalCount);
+    }
+
     public async Task<InventoryUnitInfo> GetInventoryUnitAsync(
         Guid inventoryUnitId,
         CancellationToken cancellationToken)
@@ -273,7 +301,7 @@ internal sealed class InventoryService(
             command.Karat,
             command.AcquisitionCostRials,
             receivedAt);
-        item.Receive(1);
+        item.ReceivePurchase(1, command.AcquisitionCostRials);
         var movement = CreateMovement(
             item,
             StockMovementType.Purchase,
@@ -430,8 +458,18 @@ internal sealed class InventoryService(
             command.DestinationWarehouseId,
             source.ProductVariantId,
             cancellationToken);
+        var transferCost = source.HasAcquisitionCost
+            ? source.AverageUnitCostRials
+            : (long?)null;
         source.Adjust(-command.Quantity);
-        destination.Receive(command.Quantity);
+        if (transferCost is null)
+        {
+            destination.Receive(command.Quantity);
+        }
+        else
+        {
+            destination.ReceivePurchase(command.Quantity, transferCost.Value);
+        }
         var transferId = Guid.NewGuid();
         var sourceMovement = CreateMovement(
                 source,
@@ -488,7 +526,7 @@ internal sealed class InventoryService(
             unit.ProductVariantId,
             cancellationToken);
         source.Adjust(-1);
-        destination.Receive(1);
+        destination.ReceivePurchase(1, unit.AcquisitionCostRials);
         unit.TransferTo(destination.WarehouseId, destination.Id);
         var transferId = Guid.NewGuid();
         var sourceMovement = CreateMovement(
@@ -746,6 +784,8 @@ internal sealed class InventoryService(
         item.QuantityOnHand,
         item.QuantityReserved,
         item.QuantityAvailable,
+        item.AverageUnitCostRials,
+        item.HasAcquisitionCost,
         Convert.ToBase64String(item.RowVersion));
 
     private static WarehouseInfo MapWarehouse(Warehouse warehouse) => new(

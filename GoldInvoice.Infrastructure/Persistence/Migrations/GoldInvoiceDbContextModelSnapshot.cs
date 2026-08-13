@@ -22,6 +22,322 @@ namespace GoldInvoice.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("GoldInvoice.Domain.Business.CustomerInteraction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("InteractionType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTimeOffset?>("NextFollowUpAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId", "OccurredAt");
+
+                    b.HasIndex("Status", "NextFollowUpAt");
+
+                    b.ToTable("CustomerInteractions", "crm", t =>
+                        {
+                            t.HasCheckConstraint("CK_CustomerInteractions_Completion", "([Status] = 'Completed' AND [CompletedAt] IS NOT NULL) OR ([Status] <> 'Completed' AND [CompletedAt] IS NULL)");
+
+                            t.HasCheckConstraint("CK_CustomerInteractions_FollowUp", "[NextFollowUpAt] IS NULL OR [NextFollowUpAt] > [OccurredAt]");
+                        });
+                });
+
+            modelBuilder.Entity("GoldInvoice.Domain.Business.Supplier", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AddressLine")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("ContactName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("DeletedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(256)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(256)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("NationalId")
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("IsActive", "Name");
+
+                    b.ToTable("Suppliers", "business", t =>
+                        {
+                            t.HasCheckConstraint("CK_Suppliers_SoftDelete", "([IsDeleted] = 0 AND [DeletedAt] IS NULL) OR ([IsDeleted] = 1 AND [DeletedAt] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("GoldInvoice.Domain.Business.SupplierPurchase", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("PricingRuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductVariantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PurchaseNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTimeOffset>("PurchasedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long>("SellingUnitPriceRials")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("StockMovementId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SupplierId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SupplierReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("TotalCostRials")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("UnitCostRials")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasPrecision(7)
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("PricingRuleId");
+
+                    b.HasIndex("PurchaseNumber")
+                        .IsUnique();
+
+                    b.HasIndex("StockMovementId")
+                        .IsUnique();
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("ProductVariantId", "PurchasedAt");
+
+                    b.HasIndex("SupplierId", "PurchasedAt");
+
+                    b.ToTable("SupplierPurchases", "business", t =>
+                        {
+                            t.HasCheckConstraint("CK_SupplierPurchases_Amounts", "[UnitCostRials] >= 0 AND [SellingUnitPriceRials] > 0 AND [TotalCostRials] = [UnitCostRials] * [Quantity]");
+
+                            t.HasCheckConstraint("CK_SupplierPurchases_Quantity", "[Quantity] > 0");
+                        });
+                });
+
+            modelBuilder.Entity("GoldInvoice.Domain.Business.CustomerInteraction", b =>
+                {
+                    b.HasOne("GoldInvoice.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("GoldInvoice.Domain.Business.SupplierPurchase", b =>
+                {
+                    b.HasOne("GoldInvoice.Domain.Inventory.InventoryItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("GoldInvoice.Domain.Pricing.ProductPricingRule", null)
+                        .WithMany()
+                        .HasForeignKey("PricingRuleId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("GoldInvoice.Domain.Catalog.ProductVariant", null)
+                        .WithMany()
+                        .HasForeignKey("ProductVariantId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("GoldInvoice.Domain.Inventory.StockMovement", null)
+                        .WithMany()
+                        .HasForeignKey("StockMovementId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("GoldInvoice.Domain.Business.Supplier", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("GoldInvoice.Domain.Inventory.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("GoldInvoice.Domain.Catalog.GoldProductDetail", b =>
                 {
                     b.Property<Guid>("Id")
@@ -623,12 +939,20 @@ namespace GoldInvoice.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<long>("AverageUnitCostRials")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasPrecision(7)
                         .HasColumnType("datetimeoffset(7)");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("HasAcquisitionCost")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<Guid>("ProductVariantId")
                         .HasColumnType("uniqueidentifier");
@@ -666,6 +990,8 @@ namespace GoldInvoice.Infrastructure.Persistence.Migrations
 
                     b.ToTable("InventoryItems", "inventory", t =>
                         {
+                            t.HasCheckConstraint("CK_InventoryItems_AverageCost", "[AverageUnitCostRials] >= 0");
+
                             t.HasCheckConstraint("CK_InventoryItems_Available", "[QuantityReserved] <= [QuantityOnHand]");
 
                             t.HasCheckConstraint("CK_InventoryItems_OnHand", "[QuantityOnHand] >= 0");
@@ -1572,12 +1898,21 @@ namespace GoldInvoice.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<long?>("AcquisitionTotalCostRials")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("AcquisitionUnitCostRials")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasPrecision(7)
                         .HasColumnType("datetimeoffset(7)");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<long?>("GrossProfitRials")
+                        .HasColumnType("bigint");
 
                     b.Property<long?>("GoldValueRials")
                         .HasColumnType("bigint");
@@ -1685,6 +2020,8 @@ namespace GoldInvoice.Infrastructure.Persistence.Migrations
 
                     b.ToTable("InvoiceItems", "invoicing", t =>
                         {
+                            t.HasCheckConstraint("CK_InvoiceItems_AcquisitionCost", "([AcquisitionUnitCostRials] IS NULL AND [AcquisitionTotalCostRials] IS NULL AND [GrossProfitRials] IS NULL) OR ([AcquisitionUnitCostRials] >= 0 AND [AcquisitionTotalCostRials] = [AcquisitionUnitCostRials] * [Quantity] AND [GrossProfitRials] = [LineTotalRials] - [AcquisitionTotalCostRials])");
+
                             t.HasCheckConstraint("CK_InvoiceItems_Amounts", "[UnitPriceRials] >= 0 AND [Quantity] > 0 AND [LineTotalRials] = [UnitPriceRials] * [Quantity]");
 
                             t.HasCheckConstraint("CK_InvoiceItems_LineNumber", "[LineNumber] > 0");
@@ -2098,12 +2435,21 @@ namespace GoldInvoice.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<long?>("AcquisitionTotalCostRials")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("AcquisitionUnitCostRials")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasPrecision(7)
                         .HasColumnType("datetimeoffset(7)");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<long?>("GrossProfitRials")
+                        .HasColumnType("bigint");
 
                     b.Property<long?>("GoldValueRials")
                         .HasColumnType("bigint");
@@ -2212,6 +2558,8 @@ namespace GoldInvoice.Infrastructure.Persistence.Migrations
 
                     b.ToTable("OrderItems", "sales", t =>
                         {
+                            t.HasCheckConstraint("CK_OrderItems_AcquisitionCost", "([AcquisitionUnitCostRials] IS NULL AND [AcquisitionTotalCostRials] IS NULL AND [GrossProfitRials] IS NULL) OR ([AcquisitionUnitCostRials] >= 0 AND [AcquisitionTotalCostRials] = [AcquisitionUnitCostRials] * [Quantity] AND [GrossProfitRials] = [LineTotalRials] - [AcquisitionTotalCostRials])");
+
                             t.HasCheckConstraint("CK_OrderItems_Amounts", "[UnitPriceRials] >= 0 AND [Quantity] > 0 AND [LineTotalRials] = [UnitPriceRials] * [Quantity]");
 
                             t.HasCheckConstraint("CK_OrderItems_LineNumber", "[LineNumber] > 0");

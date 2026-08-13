@@ -28,6 +28,10 @@ public static class SecurityPermissions
     public const string InvoicesPrint = "Invoices.Print";
     public const string InvoicesReprint = "Invoices.Reprint";
     public const string ReportsRead = "Reports.Read";
+    public const string SuppliersRead = "Suppliers.Read";
+    public const string SuppliersManage = "Suppliers.Manage";
+    public const string CrmRead = "Crm.Read";
+    public const string CrmManage = "Crm.Manage";
     public const string AuditLogsRead = "AuditLogs.Read";
     public const string SettingsRead = "Settings.Read";
     public const string SettingsManage = "Settings.Manage";
@@ -52,6 +56,10 @@ public static class SecurityPermissions
         new(InvoicesPrint, "Print invoices", "Invoicing"),
         new(InvoicesReprint, "Reprint invoices", "Invoicing"),
         new(ReportsRead, "Read reports", "Reports"),
+        new(SuppliersRead, "Read suppliers", "Suppliers"),
+        new(SuppliersManage, "Manage suppliers", "Suppliers"),
+        new(CrmRead, "Read customer interactions", "CRM"),
+        new(CrmManage, "Manage customer interactions", "CRM"),
         new(AuditLogsRead, "Read audit logs", "Security"),
         new(SettingsRead, "Read settings", "Settings"),
         new(SettingsManage, "Manage settings", "Settings"),

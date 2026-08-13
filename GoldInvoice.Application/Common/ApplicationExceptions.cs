@@ -23,3 +23,11 @@ public sealed class ApplicationConcurrencyException : ApplicationConflictExcepti
 public sealed class ManualPriceReviewRequiredException : ApplicationConflictException
 {
 }
+
+public sealed class StoreProfileNotConfiguredException : Exception
+{
+    public StoreProfileNotConfiguredException()
+        : base("The store profile must be configured before an order can be created.")
+    {
+    }
+}

@@ -10,6 +10,7 @@ using GoldInvoice.Application.Pricing;
 using GoldInvoice.Application.Settings;
 using GoldInvoice.Domain.Catalog;
 using GoldInvoice.Domain.Inventory;
+using GoldInvoice.Domain.Invoicing;
 using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Payments;
 using GoldInvoice.Domain.Pricing;
@@ -74,6 +75,98 @@ public sealed class PhaseFiveWorkflowTests
             message.MessageType == IntegrationEventTypes.OrderStatusChangedV1));
         Assert.Equal(3, outbox.Count(message =>
             message.MessageType == IntegrationEventTypes.InventoryChangedV1));
+    }
+
+    [Fact]
+    public async Task PaidInvoice_AllowsAuditedDocumentCorrectionWithoutChangingFinancialSnapshot()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var payment = await scenario.CreatePaymentService(Array.Empty<IPaymentGatewayProvider>()).RecordManualPaymentAsync(
+            new RecordManualPaymentCommand(
+                scenario.Customer.Id,
+                scenario.Order.Id,
+                PaymentMethod.PointOfSale,
+                "POS-CORRECTION-100",
+                "manual-correction-key-100"),
+            CancellationToken.None);
+        var before = await scenario.InvoiceService.GetInvoiceAsync(
+            payment.InvoiceId!.Value,
+            scenario.Customer.Id,
+            canReadAll: true,
+            CancellationToken.None);
+
+        var corrected = await scenario.InvoiceService.CorrectDocumentAsync(
+            before.Id,
+            new CorrectInvoiceDocumentCommand(
+                scenario.Customer.Id,
+                "Corrected Customer",
+                "0087654321",
+                "Corrected Recipient",
+                "09120000002",
+                "Tehran",
+                "Tehran",
+                "1111111112",
+                "Corrected invoice delivery address",
+                "Customer requested correction",
+                before.RowVersion),
+            CancellationToken.None);
+
+        Assert.Equal(before.InvoiceNumber, corrected.InvoiceNumber);
+        Assert.Equal(before.GrandTotalRials, corrected.GrandTotalRials);
+        Assert.Equal(before.Items, corrected.Items);
+        Assert.Equal("Corrected Customer", corrected.CustomerNameSnapshot);
+        Assert.Equal("09120000002", corrected.Address!.PhoneNumber);
+        Assert.Single(await scenario.Context.AuditLogs
+            .Where(log => log.Action == "InvoiceDocumentCorrected")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task PaidInvoice_PrintJobsTrackFirstPrintAndAuthorizedReprint()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var payment = await scenario.CreatePaymentService(Array.Empty<IPaymentGatewayProvider>()).RecordManualPaymentAsync(
+            new RecordManualPaymentCommand(
+                scenario.Customer.Id,
+                scenario.Order.Id,
+                PaymentMethod.Cash,
+                "CASH-PRINT-100",
+                "manual-print-key-100"),
+            CancellationToken.None);
+        var invoiceId = payment.InvoiceId!.Value;
+
+        var first = await scenario.InvoiceService.RequestPrintAsync(
+            invoiceId,
+            new RequestInvoicePrintCommand(
+                scenario.Customer.Id,
+                Copies: 1,
+                CanReprint: false,
+                ReprintReason: null),
+            CancellationToken.None);
+        var completed = await scenario.InvoiceService.CompletePrintAsync(
+            invoiceId,
+            first.Id,
+            new CompleteInvoicePrintCommand(
+                scenario.Customer.Id,
+                Succeeded: true,
+                PrinterName: "Test Printer",
+                FailureCode: null,
+                RowVersion: first.RowVersion),
+            CancellationToken.None);
+        var reprint = await scenario.InvoiceService.RequestPrintAsync(
+            invoiceId,
+            new RequestInvoicePrintCommand(
+                scenario.Customer.Id,
+                Copies: 2,
+                CanReprint: true,
+                ReprintReason: "Customer requested another copy"),
+            CancellationToken.None);
+
+        Assert.Equal(InvoicePrintStatus.Succeeded, completed.Status);
+        Assert.Equal("Test Printer", completed.PrinterName);
+        Assert.True(reprint.IsReprint);
+        Assert.Equal(2, reprint.Copies);
+        Assert.Equal(2, await scenario.Context.InvoicePrintLogs.CountAsync());
     }
 
     [Fact]
@@ -310,6 +403,67 @@ public sealed class PhaseFiveWorkflowTests
     }
 
     [Fact]
+    public async Task CreateOrder_WithoutStoreProfileReturnsSetupPrecondition()
+    {
+        await using var scenario = await CreateScenarioAsync(
+            createOrder: false,
+            configureStoreProfile: false);
+
+        await Assert.ThrowsAsync<StoreProfileNotConfiguredException>(() =>
+            scenario.OrderService.CreateOrderAsync(
+                scenario.CreateOrderCommand("order-without-store-profile"),
+                CancellationToken.None));
+
+        Assert.Empty(await scenario.Context.Orders.ToListAsync());
+        Assert.Empty(await scenario.Context.IdempotencyRecords.ToListAsync());
+        Assert.Empty(await scenario.Context.StockReservations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CustomerAddress_CanBeViewedEditedAndDeletedWithFreshRowVersion()
+    {
+        await using var scenario = await CreateScenarioAsync(createOrder: false);
+        var service = new CustomerAddressService(scenario.Context);
+
+        var loaded = Assert.Single(await service.GetAddressesAsync(
+            scenario.Customer.Id,
+            scenario.Customer.Id,
+            canManageCustomer: false,
+            CancellationToken.None));
+        var updated = await service.UpdateAddressAsync(
+            loaded.Id,
+            new UpdateCustomerAddressCommand(
+                scenario.Customer.Id,
+                scenario.Customer.Id,
+                CanManageCustomer: false,
+                "Main address",
+                loaded.RecipientName,
+                "09121111111",
+                loaded.Province,
+                loaded.City,
+                loaded.PostalCode,
+                "Updated main street",
+                IsDefault: true,
+                loaded.RowVersion),
+            CancellationToken.None);
+
+        Assert.Equal("Main address", updated.Title);
+        Assert.Equal("09121111111", updated.PhoneNumber);
+        Assert.Equal("Updated main street", updated.AddressLine);
+        await service.DeleteAddressAsync(
+            updated.Id,
+            scenario.Customer.Id,
+            canManageCustomer: false,
+            updated.RowVersion,
+            CancellationToken.None);
+        Assert.Empty(await service.GetAddressesAsync(
+            scenario.Customer.Id,
+            scenario.Customer.Id,
+            canManageCustomer: false,
+            CancellationToken.None));
+    }
+
+    [Fact]
     public async Task CreateOrder_AllowsDistinctPhysicalUnitsFromTheSameInventoryItem()
     {
         await using var scenario = await CreateScenarioAsync(createOrder: false);
@@ -476,7 +630,9 @@ public sealed class PhaseFiveWorkflowTests
         Assert.Equal(OrderStatus.AwaitingPayment, (await scenario.Context.Orders.SingleAsync()).Status);
     }
 
-    private static async Task<Scenario> CreateScenarioAsync(bool createOrder = true)
+    private static async Task<Scenario> CreateScenarioAsync(
+        bool createOrder = true,
+        bool configureStoreProfile = true)
     {
         var timeProvider = new FixedTimeProvider(FixedNow);
         var context = CreateContext(timeProvider);
@@ -492,18 +648,21 @@ public sealed class PhaseFiveWorkflowTests
         await context.SaveChangesAsync();
 
         var storeService = new StoreProfileService(context);
-        await storeService.UpsertAsync(
-            new UpdateStoreProfileCommand(
-                "Vendome Jewelry",
-                "Vendome Jewelry LLC",
-                "1010101010",
-                "411111111111",
-                "10001",
-                "041-00000000",
-                "5130000000",
-                "Tabriz, main jewelry market",
-                RowVersion: null),
-            CancellationToken.None);
+        if (configureStoreProfile)
+        {
+            await storeService.UpsertAsync(
+                new UpdateStoreProfileCommand(
+                    "Vendome Jewelry",
+                    "Vendome Jewelry LLC",
+                    "1010101010",
+                    "411111111111",
+                    "10001",
+                    "041-00000000",
+                    "5130000000",
+                    "Tabriz, main jewelry market",
+                    RowVersion: null),
+                CancellationToken.None);
+        }
         var addressService = new CustomerAddressService(context);
         var address = await addressService.CreateAddressAsync(
             new CreateCustomerAddressCommand(
@@ -649,13 +808,14 @@ public sealed class PhaseFiveWorkflowTests
         public CustomerAddressInfo Address { get; } = address;
         public OrderInfo Order { get; set; } = null!;
         public OrderService OrderService { get; } = orderService;
+        public InvoiceService InvoiceService { get; } = invoiceService;
         public TimeProvider TimeProvider { get; } = timeProvider;
 
         public CreateOrderCommand CreateOrderCommand(string idempotencyKey) => new(
-            customer.Id,
-            customer.Id,
+            Customer.Id,
+            Customer.Id,
             CanManageOrders: false,
-            address.Id,
+            Address.Id,
             "0012345678",
             [new CreateOrderLineCommand(
                 inventoryItem.Id,
@@ -671,20 +831,20 @@ public sealed class PhaseFiveWorkflowTests
             idempotencyKey);
 
         public PaymentService CreatePaymentService(IEnumerable<IPaymentGatewayProvider> providers) => new(
-            context,
+            Context,
             providers,
             coordinator,
-            invoiceService,
+            InvoiceService,
             outboxWriter,
             Options.Create(new PaymentProcessingOptions
             {
                 ProviderTimeoutSeconds = 2,
                 MaximumGatewayConfigurationsPerProvider = 2
             }),
-            timeProvider,
+            TimeProvider,
             NullLogger<PaymentService>.Instance);
 
-        public ValueTask DisposeAsync() => context.DisposeAsync();
+        public ValueTask DisposeAsync() => Context.DisposeAsync();
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

@@ -1,3 +1,5 @@
+using GoldInvoice.Application;
+using GoldInvoice.Domain.Business;
 using GoldInvoice.Domain.Catalog;
 using GoldInvoice.Domain.Inventory;
 using GoldInvoice.Domain.Invoicing;
@@ -39,6 +41,7 @@ public sealed class PersistenceModelTests
             typeof(Product),
             typeof(ProductVariant),
             typeof(ProductImage),
+            typeof(SupplierPurchase),
             typeof(Warehouse),
             typeof(InventoryItem),
             typeof(StockMovement),
@@ -173,9 +176,14 @@ public sealed class PersistenceModelTests
         var services = new ServiceCollection();
         services.AddLogging();
 
+        services.AddApplication();
         services.AddInfrastructure(configuration);
 
-        using var provider = services.BuildServiceProvider();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true
+        });
         using var scope = provider.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
         var databaseOptions = scope.ServiceProvider

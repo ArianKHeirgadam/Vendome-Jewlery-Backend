@@ -36,7 +36,57 @@ public sealed class InventoryItemResponse
     public required int QuantityOnHand { get; init; }
     public required int QuantityReserved { get; init; }
     public required int QuantityAvailable { get; init; }
+    public required long AverageUnitCostRials { get; init; }
+    public required bool HasAcquisitionCost { get; init; }
     public required string RowVersion { get; init; }
+}
+
+public sealed class SupplierPurchaseResponse
+{
+    public required Guid Id { get; init; }
+    public required string PurchaseNumber { get; init; }
+    public required Guid SupplierId { get; init; }
+    public required string SupplierName { get; init; }
+    public required Guid WarehouseId { get; init; }
+    public required string WarehouseName { get; init; }
+    public required Guid ProductVariantId { get; init; }
+    public required string ProductName { get; init; }
+    public required string VariantName { get; init; }
+    public required string Sku { get; init; }
+    public required Guid InventoryItemId { get; init; }
+    public required int Quantity { get; init; }
+    public required long UnitCostRials { get; init; }
+    public required long TotalCostRials { get; init; }
+    public required long SellingUnitPriceRials { get; init; }
+    public required long ExpectedUnitProfitRials { get; init; }
+    public required long ExpectedTotalProfitRials { get; init; }
+    public required DateTimeOffset PurchasedAt { get; init; }
+    public string? SupplierReference { get; init; }
+    public string? Notes { get; init; }
+}
+
+public sealed class RecordSupplierPurchaseRequest
+{
+    public Guid SupplierId { get; init; }
+    public Guid WarehouseId { get; init; }
+    public Guid ProductVariantId { get; init; }
+
+    [Range(1, int.MaxValue)]
+    public int Quantity { get; init; }
+
+    [Range(0, long.MaxValue)]
+    public long UnitCostRials { get; init; }
+
+    [Range(1, long.MaxValue)]
+    public long SellingUnitPriceRials { get; init; }
+
+    public DateTimeOffset? PurchasedAt { get; init; }
+
+    [StringLength(100)]
+    public string? SupplierReference { get; init; }
+
+    [StringLength(1000)]
+    public string? Notes { get; init; }
 }
 
 public sealed class InventoryUnitResponse

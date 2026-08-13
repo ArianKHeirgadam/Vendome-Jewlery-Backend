@@ -50,6 +50,9 @@ public sealed class OrderItemResponse
     public long? TaxRials { get; init; }
     public required long UnitPriceRials { get; init; }
     public required long LineTotalRials { get; init; }
+    public long? AcquisitionUnitCostRials { get; init; }
+    public long? AcquisitionTotalCostRials { get; init; }
+    public long? GrossProfitRials { get; init; }
     public string? RoundingPolicy { get; init; }
 }
 

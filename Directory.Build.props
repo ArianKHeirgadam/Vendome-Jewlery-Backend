@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- The deployment network can block NuGet's advisory endpoint even when
+         package restore succeeds. Security auditing is run explicitly on a
+         connected build agent; disabling restore-time audit keeps local and
+         Visual Studio builds deterministic and warning-free. -->
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+</Project>

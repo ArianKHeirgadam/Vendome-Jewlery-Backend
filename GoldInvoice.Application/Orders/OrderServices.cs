@@ -46,6 +46,9 @@ public sealed record OrderItemInfo(
     long? TaxRials,
     long UnitPriceRials,
     long LineTotalRials,
+    long? AcquisitionUnitCostRials,
+    long? AcquisitionTotalCostRials,
+    long? GrossProfitRials,
     string? RoundingPolicy);
 
 public sealed record OrderInfo(

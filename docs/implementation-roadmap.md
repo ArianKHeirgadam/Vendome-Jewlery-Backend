@@ -2,19 +2,22 @@
 
 ## Current Phase
 
-Phase 6 implementation: Worker isolation, durable Outbox dispatch, and authorized SignalR delivery.
+Phase 7C-A implementation: paid-invoice preview, audited document correction,
+PDF export, and local Desktop printing. Device enrollment and device-bound
+printer discovery remain Phase 7C-B.
 
-The user confirmed on 2026-08-10 that the Phase 5 restore, build, complete test suite, and database verification all passed on the target .NET 8/SQL Server environment. Phase 5 is therefore closed and Phase 6 is authorized. This environment still has no .NET SDK or target SQL Server access, so Phase 6 validation must be repeated on that environment before Phase 6 closes.
+The user confirmed on 2026-08-10 that the Phase 5 restore, build, complete test suite, and database verification passed. After the Phase 6 cancellation/scope fixes, the user also reported the complete 97-test suite passing on the target .NET 8 environment and authorized the next phase. SQL Server concurrent-claim evidence, final migration/model verification, commit, and push must still be recorded in the Phase 6 completion report rather than being silently assumed.
 
-Phase 6 reuses the existing Outbox schema and introduces no database-model change. No completed phase is rebuilt, no shared migration is edited, and no future-phase table or behavior is introduced early.
+Phase 7A introduced no database-model change and integrated the existing Phase 3 authentication and Phase 6 SignalR contracts with the shared React client and WPF/WebView2 host. Phase 7B connects every management route to authorized data and adds the missing supplier and CRM persistence. Phase 7C-A reuses the existing invoice, audit, permission, and print-log model to complete local document output without another migration.
 
 The committed migration chain is:
 
 1. `20260731190255_InitialDomainModel`
 2. `20260731213000_AddPhase4CatalogPricingInventory`
 3. `20260801130000_AddPhase5OrdersPaymentsInvoices`
+4. `20260811143000_AddPhase7BusinessDirectories`
 
-Because all three migrations are committed and pushed, they are immutable regardless of whether a particular database has applied them. Every future database change must use a new additive EF Core migration.
+The first three shared migrations remain immutable. Phase 7B is represented only by the fourth additive migration; every future database change must likewise use a new migration rather than rewriting history.
 
 ## Completed Requirements
 
@@ -67,7 +70,7 @@ Because all three migrations are committed and pushed, they are immutable regard
 - Configurable `PaymentGateway` rows containing only non-secret configuration references and a pluggable `IPaymentGatewayProvider` boundary.
 - Idempotent online initiation, bounded provider timeout, validated HTTPS redirect handling, masked metadata, authenticated and rate-limited callbacks, duplicate callback boundaries, and explicit `RequiresReview` handling for ambiguous callbacks.
 - Manual payment paths use the same inventory confirmation, order transition, and invoice transaction; review-state payments cannot be silently replaced.
-- Atomic, concurrency-protected `InvoiceSequence`, unique invoice number/order/payment boundaries, immutable invoice item/address/store/customer snapshots, explicit voiding, and no number reuse.
+- Atomic, concurrency-protected `InvoiceSequence`, unique invoice number/order/payment boundaries, immutable financial/item/store snapshots, audited buyer/delivery print-field corrections, explicit voiding, and no number reuse.
 - Tests are present for duplicate callbacks, duplicate invoice prevention, idempotent order/payment behavior, sequence monotonicity, filtered indexes, no-cascade relationships, snapshot consistency, and pending EF model changes.
 - Additive migration `AddPhase5OrdersPaymentsInvoices`; earlier migrations remain unchanged.
 - Phase details are recorded in `docs/architecture/phase-5-orders-payments-invoices.md`.
@@ -83,7 +86,7 @@ Reported successful by the user on the target environment. The commands and data
 - Run a Release build with warnings and errors reported without modifying source-generated migration history.
 - Run the full Unit and Integration test suites; the repository currently contains 84 `[Fact]`/`[Theory]` tests.
 - Confirm `GoldInvoiceDbContext.Database.HasPendingModelChanges()` remains false.
-- Run `dotnet ef migrations list` and confirm exactly the three committed migrations listed under Current Phase.
+- Run `dotnet ef migrations list` and confirm the three migrations through Phase 5.
 - Inspect the target database's `dbo.__EFMigrationsHistory` before applying any migration.
 - Apply only pending committed migrations to the intended non-production database; never drop a database, delete migration-history rows, or rewrite an applied/shared migration.
 - For any database containing real data, take and verify an appropriate backup before applying an additive migration.
@@ -119,7 +122,7 @@ The new requirement set exposed two Phase 3 behaviors that are not evidenced by 
 - Add explicit Owner/Admin/Customer endpoint-level authorization tests for these administration paths.
 - This follow-up remains assigned to the security module and is not silently represented as Phase 6 work. Any required schema change must be a new additive migration; existing security migrations remain immutable.
 
-## Current Phase Requirements
+## Phase 6 Implemented Requirements
 
 ### Phase 6: Worker, outbox, and SignalR
 
@@ -160,14 +163,20 @@ The new requirement set exposed two Phase 3 behaviors that are not evidenced by 
 
 Phase 6 implementation details are recorded in `docs/architecture/phase-6-worker-outbox-signalr.md`. The existing Outbox table is sufficient, so this phase currently has no EF Core migration and no Inbox table.
 
-## Deferred Requirements
+## Current and Deferred Requirements
 
 ### Phase 7: Desktop and printing
+
+Phase 7A now provides the shared React source tree, WPF/WebView2 host, complete existing authentication state machine, DPAPI-protected Desktop refresh-token storage, API endpoint configuration, authorized SignalR connection, event de-duplication, and reconnect cursor recovery. Its decisions and verification gate are recorded in `docs/architecture/phase-7a-desktop-client-integration.md`.
+
+Phase 7B now completes the operational management pages, authenticated data loading, directories, suppliers, and CRM. Phase 7C-A completes automatic post-payment invoice opening, an A4 RTL preview, audited correction of non-financial print fields, PDF export, and local default-printer output. Its decisions are recorded in `docs/architecture/phase-7c-invoice-documents.md`. The remaining device-bound requirements below are Phase 7C-B.
 
 #### Existing foundation to reuse
 
 - Reuse `devices.DesktopDevices` and `invoicing.InvoicePrintLogs`; do not create duplicate device or generic log tables.
-- Treat the existing `DesktopDevice` and `InvoicePrintLog` rows as schema preparation, not as a completed Desktop/printing workflow.
+- Phase 7C-A activates local `InvoicePrintLog` request/result tracking. Treat
+  `DesktopDevice` and the missing printer/profile/job entities as foundations for
+  the still-deferred device-bound workflow.
 
 #### Device and printer model
 
@@ -180,7 +189,9 @@ Phase 6 implementation details are recorded in `docs/architecture/phase-6-worker
 
 - Add `InvoicePrintJob` linked to invoice, approved Desktop device, device printer, and print profile, with status, requester, timestamps, retry count, sanitized failure fields, idempotency key, and rowversion.
 - Keep print jobs durable and idempotent. The Backend records a request; only the Desktop application can report that the operating-system print completed or failed.
-- Keep `InvoicePrintLog` append-only. Reprints require a reason and the requesting/approving user, and must never erase earlier attempts.
+- Preserve every `InvoicePrintLog` attempt: only its one-way
+  `Requested -> Succeeded|Failed` completion may update it. Reprints require a
+  reason and the requesting/approving user, and never erase earlier attempts.
 - Verify the printer belongs to the selected Desktop device and is currently enabled before dispatch.
 - Hide operating-system and printer-sensitive failure details from Customers.
 - Deny Customer access to device, printer, job-management, and result-reporting APIs.
@@ -240,22 +251,24 @@ Phase 6 implementation details are recorded in `docs/architecture/phase-6-worker
 
 ## Known Risks
 
-- This environment has no `dotnet`, MSBuild, C# compiler, container runtime, or cached .NET SDK package. Phase 6 Restore, Build, Test, `dotnet ef migrations list`, and `HasPendingModelChanges` cannot be executed here.
+- This environment has no `dotnet`, MSBuild, C# compiler, container runtime, or cached .NET SDK package. The complete Solution/WPF build, .NET tests, `dotnet ef migrations list`, and `HasPendingModelChanges` cannot be executed here. Phase 7B React checks, production build, and dependency audit do run here.
 - The target SQL Server is reachable only from the user's Windows machine. SQL Server claim concurrency and the unchanged migration/model state must be verified there before Phase 6 closes.
 - Phase 3 has persistence and pure policies for `RolePermission` and `TrustedDevice`, but no complete administration/trusted-device application/API workflow is visible. That retrospective work remains explicitly tracked outside Phase 6.
 - There is no repository CI workflow, so Git history contains no independent Build/Test result for commit `2607d4d`.
 - No production market-price provider, payment gateway adapter, or secret-delivery mechanism has been selected. The existing contracts and safe orchestration must not be mistaken for production integrations.
-- Phase 6 now implements the existing `OutboxMessage` lifecycle locally; `DesktopDevice` and `InvoicePrintLog` remain forward foundations for the Phase 7 workflow.
+- Phase 6 implements the existing `OutboxMessage` lifecycle locally. Phase 7C-A
+  activates local invoice print logs; `DesktopDevice` remains the forward
+  foundation for Phase 7C-B device-bound printing.
 - SignalR delivery is in-process. A multi-node API deployment requires a supported backplane or managed SignalR service; SQL Outbox claiming alone does not fan a notification out to connections on every API node.
 - Refunds and returns have materially different inventory, payment, accounting, and fiscal consequences; implementing them before business rules are confirmed would create unsafe generic behavior.
 
 ## Next Step
 
-1. Run restore, Release build, and the complete 96-test suite on the target .NET 8 environment.
-2. Confirm `GoldInvoiceDbContext.Database.HasPendingModelChanges()` remains false and the migration list still contains exactly the three committed migrations through Phase 5.
-3. Exercise two concurrent dispatcher instances against SQL Server to verify atomic claims, expired-lock recovery, retry timing, and dead-letter transitions.
-4. Verify an authenticated SignalR client receives only its user/role/device audiences and recovers missed hints through the cursor API.
-5. Record the Phase 6 completion report, then commit and push only after all gates succeed. Do not include refund, return, Desktop, printing, or Phase 8 hardening scope in Phase 6.
+1. Run restore, Release build, and the complete test suite on the target Windows/.NET 8 environment.
+2. Start `GoldInvoice.Api` and `VendomeJewleryDesktopApp` together and verify password login, required MFA, first-login MFA enrollment, refresh rotation across restart, logout, and rejected/revoked sessions.
+3. Disconnect and reconnect the API and verify that the React client receives only its user/role audiences, de-duplicates event IDs, and advances the recovery cursor.
+4. Confirm `GoldInvoiceDbContext.Database.HasPendingModelChanges()` remains false and the migration list contains the three earlier migrations plus `AddPhase7BusinessDirectories`.
+5. Record Phase 7C-A invoice-document verification, then implement Phase 7C-B device enrollment, printer discovery, and device-bound profiles through a new additive migration.
 
 ## Phase Completion Report Template
 

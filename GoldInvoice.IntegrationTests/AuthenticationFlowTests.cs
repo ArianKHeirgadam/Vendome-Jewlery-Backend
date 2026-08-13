@@ -3,6 +3,8 @@ using System.Buffers.Binary;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using GoldInvoice.Api.Security;
+using GoldInvoice.Application.Common;
+using GoldInvoice.Application.People;
 using GoldInvoice.Application.Security;
 using GoldInvoice.Infrastructure;
 using GoldInvoice.Infrastructure.Configuration;
@@ -282,6 +284,61 @@ public sealed class AuthenticationFlowTests
 
         Assert.Throws<OptionsValidationException>(() =>
             provider.GetRequiredService<IOptions<JwtOptions>>().Value);
+    }
+
+    [Fact]
+    public void SecurityInfrastructure_RegistersPeopleDirectoryWithIdentityDependencies()
+    {
+        using var provider = CreateProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IPeopleDirectoryService>());
+    }
+
+    [Fact]
+    public async Task PeopleDirectory_CreatesPhoneOnlyCustomerWhoCanSignInByPhone()
+    {
+        await using var provider = CreateProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+        var roleResult = await roleManager.CreateAsync(new ApplicationRole(
+            SecurityRoles.Customer,
+            "Phone customer test role",
+            isSystem: true));
+        Assert.True(roleResult.Succeeded);
+        var directory = scope.ServiceProvider.GetRequiredService<IPeopleDirectoryService>();
+
+        var person = await directory.CreateCustomerAsync(
+            new CreateCustomerCommand(
+                "Phone Only Customer",
+                "۰۹۱۲ ۰۰۰ ۰۰۰۱",
+                ValidPassword),
+            CancellationToken.None);
+
+        Assert.Null(person.Email);
+        Assert.Equal("09120000001", person.PhoneNumber);
+        var dbContext = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
+        var stored = await dbContext.Users.SingleAsync(user => user.Id == person.Id);
+        Assert.Null(stored.Email);
+        Assert.Equal("09120000001", stored.UserName);
+        Assert.Equal("09120000001", stored.PhoneNumber);
+        Assert.True(stored.PhoneNumberConfirmed);
+
+        var authentication = scope.ServiceProvider.GetRequiredService<IAccountAuthenticationService>();
+        var signIn = await authentication.SignInAsync(
+            new SignInCommand("0912-000-0001", ValidPassword, null, null),
+            new RequestSecurityContext("127.0.0.1", "integration-test", null),
+            CancellationToken.None);
+        Assert.Equal(SignInStatus.Authenticated, signIn.Status);
+        Assert.NotNull(signIn.Tokens);
+
+        await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            directory.CreateCustomerAsync(
+                new CreateCustomerCommand(
+                    "Duplicate Phone Customer",
+                    "0912-000-0001",
+                    ValidPassword),
+                CancellationToken.None));
     }
 
     private static async Task<ApplicationUser> CreateUserAsync(

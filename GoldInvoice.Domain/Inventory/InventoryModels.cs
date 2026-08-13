@@ -88,12 +88,42 @@ public sealed class InventoryItem : AuditableEntity
 
     public int QuantityReserved { get; private set; }
 
+    public long AverageUnitCostRials { get; private set; }
+
+    public bool HasAcquisitionCost { get; private set; }
+
     public int QuantityAvailable => QuantityOnHand - QuantityReserved;
 
     public void Receive(int quantity)
     {
         Guard.AgainstNonPositive(quantity, nameof(quantity));
         QuantityOnHand = checked(QuantityOnHand + quantity);
+    }
+
+    public void ReceivePurchase(int quantity, long unitCostRials)
+    {
+        Guard.AgainstNonPositive(quantity, nameof(quantity));
+        Guard.AgainstNegative(unitCostRials, nameof(unitCostRials));
+
+        var resultingQuantity = checked(QuantityOnHand + quantity);
+        if (!HasAcquisitionCost)
+        {
+            // Legacy/initial stock has no trustworthy cost. The first documented
+            // supplier purchase becomes the best available estimate for the pool.
+            AverageUnitCostRials = unitCostRials;
+            HasAcquisitionCost = true;
+        }
+        else
+        {
+            var existingValue = checked((decimal)QuantityOnHand * AverageUnitCostRials);
+            var receivedValue = checked((decimal)quantity * unitCostRials);
+            AverageUnitCostRials = checked((long)decimal.Round(
+                (existingValue + receivedValue) / resultingQuantity,
+                0,
+                MidpointRounding.AwayFromZero));
+        }
+
+        QuantityOnHand = resultingQuantity;
     }
 
     public void Adjust(int quantityDelta)

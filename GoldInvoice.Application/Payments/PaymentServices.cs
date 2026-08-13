@@ -1,4 +1,5 @@
 using GoldInvoice.Domain.Payments;
+using GoldInvoice.Application.Common;
 
 namespace GoldInvoice.Application.Payments;
 
@@ -139,6 +140,14 @@ public interface IPaymentService
         Guid paymentId,
         Guid actorUserId,
         bool canReadAll,
+        CancellationToken cancellationToken);
+
+    Task<PagedResult<PaymentInfo>> GetPaymentsAsync(
+        Guid actorUserId,
+        bool canReadAll,
+        int page,
+        int pageSize,
+        PaymentStatus? status,
         CancellationToken cancellationToken);
 
     Task<PaymentInitiationInfo> InitiateAsync(

@@ -1,0 +1,47 @@
+--- a/GoldInvoice.Infrastructure/Integration/OutboxServices.cs
++++ b/GoldInvoice.Infrastructure/Integration/OutboxServices.cs
+@@ -288,16 +288,27 @@
+         using var handlerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+         var handlingTask = Task.WhenAll(handlers.Select(handler =>
+             handler.HandleAsync(integrationEvent, handlerCancellation.Token)));
++        var cancellationSignal = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+         while (!handlingTask.IsCompleted)
+         {
+             var heartbeatDelay = Task.Delay(
+                 TimeSpan.FromSeconds(settings.HeartbeatIntervalSeconds),
+-                cancellationToken);
+-            if (await Task.WhenAny(handlingTask, heartbeatDelay) == handlingTask)
++                CancellationToken.None);
++            var completedTask = await Task.WhenAny(
++                handlingTask,
++                heartbeatDelay,
++                cancellationSignal);
++            if (completedTask == handlingTask)
+             {
+                 break;
+             }
+ 
++            if (completedTask == cancellationSignal)
++            {
++                handlerCancellation.Cancel();
++                cancellationToken.ThrowIfCancellationRequested();
++            }
++
+             var now = timeProvider.GetUtcNow();
+             if (!await RenewAsync(
+                     integrationEvent.EventId,
+--- a/GoldInvoice.IntegrationTests/PhaseSixWorkflowTests.cs
++++ b/GoldInvoice.IntegrationTests/PhaseSixWorkflowTests.cs
+@@ -121,9 +121,10 @@
+ 
+         var dispatch = provider.GetRequiredService<IOutboxDispatcher>()
+             .DispatchBatchAsync(cancellation.Token);
+-        await handler.Entered;
++        await handler.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+         cancellation.Cancel();
+-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch);
++        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
++            await dispatch.WaitAsync(TimeSpan.FromSeconds(10)));
+ 
+         await using var scope = provider.CreateAsyncScope();
+         var message = await scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>()

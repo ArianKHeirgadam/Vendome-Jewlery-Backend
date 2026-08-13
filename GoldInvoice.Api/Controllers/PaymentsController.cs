@@ -70,6 +70,29 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
             CanReadAll(),
             cancellationToken)));
 
+    [HttpGet]
+    public async Task<ActionResult<GoldInvoice.Contracts.Common.PagedResponse<PaymentResponse>>> GetPayments(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] string? status = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await paymentService.GetPaymentsAsync(
+            User.GetRequiredUserId(),
+            CanReadAll(),
+            page,
+            pageSize,
+            ParseOptionalStatus(status),
+            cancellationToken);
+        return Ok(new GoldInvoice.Contracts.Common.PagedResponse<PaymentResponse>
+        {
+            Items = result.Items.Select(Map).ToArray(),
+            Page = result.Page,
+            PageSize = result.PageSize,
+            TotalCount = result.TotalCount
+        });
+    }
+
     [HttpPost("initiate")]
     public async Task<ActionResult<PaymentInitiationResponse>> Initiate(
         InitiatePaymentRequest request,
@@ -143,6 +166,18 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
     private bool CanReadAll() =>
         User.HasPermission(SecurityPermissions.PaymentsRead) ||
         User.HasPermission(SecurityPermissions.PaymentsManage);
+
+    private static PaymentStatus? ParseOptionalStatus(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return Enum.TryParse<PaymentStatus>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : throw new ArgumentException("The payment status is invalid.", nameof(value));
+    }
 
     private static PaymentGatewayResponse MapGateway(
         PaymentGatewayInfo gateway,

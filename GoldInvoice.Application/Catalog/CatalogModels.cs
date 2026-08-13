@@ -35,6 +35,20 @@ public sealed record ProductVariantInfo(
     GoldProductDetailInfo? GoldDetail,
     string RowVersion);
 
+public sealed record ProductImageInfo(
+    Guid Id,
+    Guid ProductId,
+    Guid? ProductVariantId,
+    string ContentType,
+    string? AltText,
+    int SortOrder,
+    bool IsPrimary,
+    string RowVersion);
+
+public sealed record ProductImageContentInfo(
+    byte[] Content,
+    string ContentType);
+
 public sealed record ProductInfo(
     Guid Id,
     Guid? ProductCategoryId,
@@ -43,7 +57,13 @@ public sealed record ProductInfo(
     string? Description,
     bool IsActive,
     IReadOnlyList<ProductVariantInfo> Variants,
+    IReadOnlyList<ProductImageInfo> Images,
     string RowVersion);
+
+public sealed record SetPrimaryProductImageCommand(
+    byte[] Content,
+    string ContentType,
+    string? AltText);
 
 public sealed record CreateProductCategoryCommand(
     string Name,
@@ -151,4 +171,29 @@ public interface ICatalogService
         Guid variantId,
         UpdateProductVariantCommand command,
         CancellationToken cancellationToken);
+}
+
+public interface IProductImageService
+{
+    Task<ProductImageInfo> SetPrimaryImageAsync(
+        Guid productId,
+        SetPrimaryProductImageCommand command,
+        CancellationToken cancellationToken);
+
+    Task<ProductImageContentInfo> GetContentAsync(
+        Guid productId,
+        Guid imageId,
+        CancellationToken cancellationToken);
+}
+
+public interface IProductImageStorage
+{
+    Task<string> SaveAsync(
+        byte[] content,
+        string contentType,
+        CancellationToken cancellationToken);
+
+    Task<byte[]> ReadAsync(string storageKey, CancellationToken cancellationToken);
+
+    Task DeleteAsync(string storageKey, CancellationToken cancellationToken);
 }

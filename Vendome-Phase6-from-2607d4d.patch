@@ -1,0 +1,3491 @@
+diff --git a/GoldInvoice.Api/ApiServiceCollectionExtensions.cs b/GoldInvoice.Api/ApiServiceCollectionExtensions.cs
+index 14cf24be38217f20bef972c8f7c4ee0d6269fecc..8b259acad2d555efd67dfcbb8314faad38f8a2e6 100644
+--- a/GoldInvoice.Api/ApiServiceCollectionExtensions.cs
++++ b/GoldInvoice.Api/ApiServiceCollectionExtensions.cs
+@@ -75,6 +75,7 @@ public static class ApiServiceCollectionExtensions
+                         HeaderNames.Authorization,
+                         HeaderNames.ContentType,
+                         correlationOptions.HeaderName,
++                        "X-SignalR-User-Agent",
+                         "Idempotency-Key")
+                     .WithExposedHeaders(correlationOptions.HeaderName)
+                     .SetPreflightMaxAge(TimeSpan.FromHours(1));
+diff --git a/GoldInvoice.Api/Controllers/IntegrationController.cs b/GoldInvoice.Api/Controllers/IntegrationController.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c671f43475a64c59ff28af5b4eb12940952cd518
+--- /dev/null
++++ b/GoldInvoice.Api/Controllers/IntegrationController.cs
+@@ -0,0 +1,96 @@
++using GoldInvoice.Api.Security;
++using GoldInvoice.Application.Integration;
++using GoldInvoice.Application.Security;
++using GoldInvoice.Contracts.Common;
++using GoldInvoice.Contracts.Integration;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.Mvc;
++
++namespace GoldInvoice.Api.Controllers;
++
++[ApiController]
++[Authorize]
++[RequestSizeLimit(32 * 1024)]
++[Route("api/v1/integration")]
++public sealed class IntegrationController(
++    IIntegrationEventQueryService eventQueryService,
++    IOutboxAdministrationService administrationService) : ControllerBase
++{
++    [HttpGet("events")]
++    public async Task<ActionResult<IntegrationEventPageResponse>> GetEvents(
++        [FromQuery] DateTimeOffset? afterOccurredAt = null,
++        [FromQuery] Guid? afterEventId = null,
++        [FromQuery] Guid? deviceId = null,
++        [FromQuery] int pageSize = 50,
++        CancellationToken cancellationToken = default)
++    {
++        var page = await eventQueryService.GetEventsAsync(
++            User.GetRequiredUserId(),
++            User.FindAll(SecurityClaimNames.Role).Select(claim => claim.Value).ToArray(),
++            deviceId,
++            afterOccurredAt,
++            afterEventId,
++            pageSize,
++            cancellationToken);
++        return Ok(new IntegrationEventPageResponse
++        {
++            Items = page.Items.Select(MapEvent).ToArray(),
++            NextOccurredAt = page.NextOccurredAt,
++            NextEventId = page.NextEventId
++        });
++    }
++
++    [Authorize(Policy = SecurityPermissions.OutboxReprocess)]
++    [HttpGet("outbox/dead-letters")]
++    public async Task<ActionResult<PagedResponse<DeadLetterResponse>>> GetDeadLetters(
++        [FromQuery] int page = 1,
++        [FromQuery] int pageSize = 20,
++        CancellationToken cancellationToken = default)
++    {
++        var result = await administrationService.GetDeadLettersAsync(page, pageSize, cancellationToken);
++        return Ok(new PagedResponse<DeadLetterResponse>
++        {
++            Items = result.Items.Select(MapDeadLetter).ToArray(),
++            Page = result.Page,
++            PageSize = result.PageSize,
++            TotalCount = result.TotalCount
++        });
++    }
++
++    [Authorize(Policy = SecurityPermissions.OutboxReprocess)]
++    [HttpPost("outbox/dead-letters/{messageId:guid}/reprocess")]
++    public async Task<ActionResult<DeadLetterResponse>> Reprocess(
++        Guid messageId,
++        ReprocessDeadLetterRequest request,
++        CancellationToken cancellationToken) =>
++        Ok(MapDeadLetter(await administrationService.ReprocessAsync(
++            messageId,
++            new ReprocessDeadLetterCommand(
++                User.GetRequiredUserId(),
++                request.Reason,
++                request.RowVersion,
++                HttpContext.TraceIdentifier),
++            cancellationToken)));
++
++    private static IntegrationEventResponse MapEvent(RecoverableIntegrationEvent integrationEvent) => new()
++    {
++        EventId = integrationEvent.EventId,
++        EventType = integrationEvent.EventType,
++        OccurredAt = integrationEvent.OccurredAt,
++        AggregateType = integrationEvent.AggregateType,
++        AggregateId = integrationEvent.AggregateId,
++        Data = integrationEvent.Data
++    };
++
++    private static DeadLetterResponse MapDeadLetter(DeadLetterInfo message) => new()
++    {
++        Id = message.Id,
++        MessageType = message.MessageType,
++        Status = message.Status,
++        OccurredAt = message.OccurredAt,
++        RetryCount = message.RetryCount,
++        NextRetryAt = message.NextRetryAt,
++        LastError = message.LastError,
++        RowVersion = message.RowVersion
++    };
++}
+diff --git a/GoldInvoice.Api/Integration/IntegrationHub.cs b/GoldInvoice.Api/Integration/IntegrationHub.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d3983c1b59f0200f6d322546a4b511f629cec8f
+--- /dev/null
++++ b/GoldInvoice.Api/Integration/IntegrationHub.cs
+@@ -0,0 +1,59 @@
++using GoldInvoice.Api.Security;
++using GoldInvoice.Application.Security;
++using GoldInvoice.Infrastructure.Persistence;
++using Microsoft.AspNetCore.Authorization;
++using Microsoft.AspNetCore.SignalR;
++using Microsoft.EntityFrameworkCore;
++
++namespace GoldInvoice.Api.Integration;
++
++[Authorize]
++public sealed class IntegrationHub(GoldInvoiceDbContext dbContext) : Hub
++{
++    public const string Route = "/hubs/integration";
++
++    public override async Task OnConnectedAsync()
++    {
++        var user = Context.User ?? throw new HubException("Authentication is required.");
++        var userId = user.GetRequiredUserId();
++        await Groups.AddToGroupAsync(Context.ConnectionId, IntegrationHubGroups.User(userId));
++
++        var roles = user.FindAll(SecurityClaimNames.Role)
++            .Select(claim => claim.Value)
++            .Where(role => SecurityRoles.All.Contains(role, StringComparer.Ordinal))
++            .Distinct(StringComparer.Ordinal)
++            .ToArray();
++        foreach (var role in roles)
++        {
++            await Groups.AddToGroupAsync(Context.ConnectionId, IntegrationHubGroups.Role(role));
++        }
++
++        var deviceValue = Context.GetHttpContext()?.Request.Query["deviceId"].ToString();
++        if (!string.IsNullOrWhiteSpace(deviceValue))
++        {
++            if (!Guid.TryParse(deviceValue, out var deviceId) ||
++                !await dbContext.DesktopDevices.AsNoTracking().AnyAsync(
++                    device => device.Id == deviceId &&
++                        device.RegisteredByUserId == userId &&
++                        device.IsActive,
++                    Context.ConnectionAborted))
++            {
++                Context.Abort();
++                throw new HubException("The device identity is not approved for this connection.");
++            }
++
++            await Groups.AddToGroupAsync(Context.ConnectionId, IntegrationHubGroups.Device(deviceId));
++        }
++
++        await base.OnConnectedAsync();
++    }
++}
++
++internal static class IntegrationHubGroups
++{
++    public static string User(Guid userId) => $"user:{userId:N}";
++
++    public static string Role(string role) => $"role:{role.Trim().ToLowerInvariant()}";
++
++    public static string Device(Guid deviceId) => $"device:{deviceId:N}";
++}
+diff --git a/GoldInvoice.Api/Integration/SignalRIntegrationEventHandler.cs b/GoldInvoice.Api/Integration/SignalRIntegrationEventHandler.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..52fab085a5fa51846b5c03ebaf36dda3d14bc91a
+--- /dev/null
++++ b/GoldInvoice.Api/Integration/SignalRIntegrationEventHandler.cs
+@@ -0,0 +1,40 @@
++using GoldInvoice.Application.Integration;
++using GoldInvoice.Contracts.Integration;
++using Microsoft.AspNetCore.SignalR;
++
++namespace GoldInvoice.Api.Integration;
++
++internal sealed class SignalRIntegrationEventHandler(IHubContext<IntegrationHub> hubContext)
++    : IIntegrationEventHandler
++{
++    public async Task HandleAsync(
++        ClaimedIntegrationEvent integrationEvent,
++        CancellationToken cancellationToken)
++    {
++        ArgumentNullException.ThrowIfNull(integrationEvent);
++        var audience = integrationEvent.Envelope.Audience;
++        var groups = audience.UserIds.Select(IntegrationHubGroups.User)
++            .Concat(audience.Roles.Select(IntegrationHubGroups.Role))
++            .Concat(audience.DeviceIds.Select(IntegrationHubGroups.Device))
++            .Distinct(StringComparer.Ordinal)
++            .ToArray();
++        if (groups.Length == 0)
++        {
++            throw new PermanentIntegrationEventException("The real-time event audience is empty.");
++        }
++
++        var notification = new IntegrationEventResponse
++        {
++            EventId = integrationEvent.EventId,
++            EventType = integrationEvent.EventType,
++            OccurredAt = integrationEvent.OccurredAt,
++            AggregateType = integrationEvent.Envelope.AggregateType,
++            AggregateId = integrationEvent.Envelope.AggregateId,
++            Data = integrationEvent.Envelope.Data
++        };
++        await hubContext.Clients.Groups(groups).SendAsync(
++            "integrationEvent",
++            notification,
++            cancellationToken);
++    }
++}
+diff --git a/GoldInvoice.Api/Program.cs b/GoldInvoice.Api/Program.cs
+index 20acc04bdb9ef520ad730a149526d35b8463c7cc..c8bbd4d43bd7846f501b8136506657808f160aea 100644
+--- a/GoldInvoice.Api/Program.cs
++++ b/GoldInvoice.Api/Program.cs
+@@ -1,8 +1,10 @@
+ using GoldInvoice.Api;
+ using GoldInvoice.Api.Configuration;
++using GoldInvoice.Api.Integration;
+ using GoldInvoice.Api.Middleware;
+ using GoldInvoice.Api.Security;
+ using GoldInvoice.Application;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Infrastructure;
+ using Microsoft.AspNetCore.Diagnostics;
+ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+@@ -21,6 +23,11 @@ builder.Logging.AddJsonConsole(options =>
+ });
+ 
+ builder.Services.AddControllers();
++builder.Services.AddSignalR(options =>
++{
++    options.EnableDetailedErrors = false;
++    options.MaximumReceiveMessageSize = 32 * 1024;
++});
+ builder.Services.AddEndpointsApiExplorer();
+ builder.Services.AddSwaggerGen(options =>
+ {
+@@ -46,9 +53,11 @@ builder.Services.AddSwaggerGen(options =>
+ });
+ builder.Services.AddApplication();
+ builder.Services.AddInfrastructure(builder.Configuration);
++builder.Services.AddSingleton<IIntegrationEventHandler, SignalRIntegrationEventHandler>();
+ builder.Services.AddSecurityInfrastructure(builder.Configuration);
+ builder.Services.AddApiFoundation(builder.Configuration);
+ builder.Services.AddApiSecurity(builder.Configuration);
++builder.Services.AddOutboxProcessing();
+ 
+ var app = builder.Build();
+ var apiOptions = app.Services.GetRequiredService<IOptions<ApiHostOptions>>().Value;
+@@ -95,6 +104,7 @@ app.UseAuthentication();
+ app.UseAuthorization();
+ 
+ app.MapControllers();
++app.MapHub<IntegrationHub>(IntegrationHub.Route);
+ app.MapHealthChecks(apiOptions.LivenessPath, new HealthCheckOptions
+ {
+     AllowCachingResponses = false,
+diff --git a/GoldInvoice.Api/Security/BearerTokenAuthenticationHandler.cs b/GoldInvoice.Api/Security/BearerTokenAuthenticationHandler.cs
+index 6c20f2baeb3e3faa04cbc178ab95a300197fd995..d422be81347679be65050ab00f3798683a2a1717 100644
+--- a/GoldInvoice.Api/Security/BearerTokenAuthenticationHandler.cs
++++ b/GoldInvoice.Api/Security/BearerTokenAuthenticationHandler.cs
+@@ -1,5 +1,6 @@
+ using System.IdentityModel.Tokens.Jwt;
+ using System.Text.Encodings.Web;
++using GoldInvoice.Api.Integration;
+ using GoldInvoice.Application.Security;
+ using GoldInvoice.Infrastructure.Configuration;
+ using Microsoft.AspNetCore.Authentication;
+@@ -22,18 +23,27 @@ internal sealed class BearerTokenAuthenticationHandler(
+     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
+     {
+         var authorization = Request.Headers[HeaderNames.Authorization].ToString();
+-        if (string.IsNullOrWhiteSpace(authorization))
++        string encodedToken;
++        if (!string.IsNullOrWhiteSpace(authorization))
+         {
+-            return AuthenticateResult.NoResult();
+-        }
++            const string prefix = "Bearer ";
++            if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
++            {
++                return AuthenticateResult.Fail("A valid bearer token is required.");
++            }
+ 
+-        const string prefix = "Bearer ";
+-        if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
++            encodedToken = authorization[prefix.Length..].Trim();
++        }
++        else if (Request.Path.StartsWithSegments(IntegrationHub.Route) &&
++                 Request.Query.TryGetValue("access_token", out var queryTokens) &&
++                 queryTokens.Count == 1)
+         {
+-            return AuthenticateResult.Fail("A valid bearer token is required.");
++            encodedToken = queryTokens[0]?.Trim() ?? string.Empty;
++        }
++        else
++        {
++            return AuthenticateResult.NoResult();
+         }
+-
+-        var encodedToken = authorization[prefix.Length..].Trim();
+         if (encodedToken.Length is < 32 or > 8192)
+         {
+             return AuthenticateResult.Fail("A valid bearer token is required.");
+diff --git a/GoldInvoice.Api/appsettings.json b/GoldInvoice.Api/appsettings.json
+index ded63314d3325fe864677b155996b8dc8e1268a2..36d6c1c9f98c3ec5f1b1fb895a787e91b84ec92b 100644
+--- a/GoldInvoice.Api/appsettings.json
++++ b/GoldInvoice.Api/appsettings.json
+@@ -32,6 +32,15 @@
+     "SequenceSeries": "DEFAULT",
+     "SequencePrefix": "INV"
+   },
++  "Outbox": {
++    "BatchSize": 50,
++    "PollIntervalMilliseconds": 1000,
++    "LockDurationSeconds": 60,
++    "HeartbeatIntervalSeconds": 20,
++    "MaximumAttempts": 5,
++    "RetryBaseDelaySeconds": 5,
++    "MaximumRetryDelaySeconds": 300
++  },
+   "Jwt": {
+     "Issuer": "VendomeJewelry.Api",
+     "Audience": "VendomeJewelry.Clients",
+diff --git a/GoldInvoice.Application/Integration/IntegrationServices.cs b/GoldInvoice.Application/Integration/IntegrationServices.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..fdb3b86a3d14a70128d658a880e7f4e28d4915c2
+--- /dev/null
++++ b/GoldInvoice.Application/Integration/IntegrationServices.cs
+@@ -0,0 +1,153 @@
++using System.Text.Json;
++using GoldInvoice.Application.Common;
++
++namespace GoldInvoice.Application.Integration;
++
++public static class IntegrationEventTypes
++{
++    public const string InvoiceCreatedV1 = "invoice.created.v1";
++    public const string InventoryChangedV1 = "inventory.changed.v1";
++    public const string OrderStatusChangedV1 = "order.status-changed.v1";
++    public const string MarketPriceUpdatedV1 = "market-price.updated.v1";
++
++    public static readonly IReadOnlySet<string> Supported = new HashSet<string>(StringComparer.Ordinal)
++    {
++        InvoiceCreatedV1,
++        InventoryChangedV1,
++        OrderStatusChangedV1,
++        MarketPriceUpdatedV1
++    };
++}
++
++public sealed record IntegrationEventAudience(
++    IReadOnlyList<Guid> UserIds,
++    IReadOnlyList<string> Roles,
++    IReadOnlyList<Guid> DeviceIds);
++
++public sealed record IntegrationEventEnvelope(
++    string AggregateType,
++    Guid AggregateId,
++    string? CorrelationId,
++    Guid? CausationId,
++    IntegrationEventAudience Audience,
++    JsonElement Data);
++
++public sealed record IntegrationEventDefinition(
++    string EventType,
++    string AggregateType,
++    Guid AggregateId,
++    DateTimeOffset OccurredAt,
++    object Data,
++    IntegrationEventAudience Audience,
++    Guid? CausationId = null);
++
++public sealed record InvoiceCreatedV1(
++    Guid InvoiceId,
++    Guid OrderId,
++    Guid PaymentId,
++    string InvoiceNumber,
++    string Status);
++
++public sealed record InventoryChangedV1(
++    Guid InventoryItemId,
++    Guid WarehouseId,
++    Guid ProductVariantId,
++    Guid? InventoryUnitId,
++    Guid MovementId,
++    string ChangeType,
++    int QuantityOnHand,
++    int QuantityReserved,
++    int QuantityAvailable);
++
++public sealed record OrderStatusChangedV1(
++    Guid OrderId,
++    Guid CustomerId,
++    string? FromStatus,
++    string ToStatus);
++
++public sealed record MarketPriceUpdatedV1(
++    Guid SnapshotId,
++    Guid SourceId,
++    string PriceType,
++    long BuyPriceRials,
++    long SellPriceRials,
++    DateTimeOffset? ProviderTimestamp);
++
++public interface IOutboxWriter
++{
++    Guid Add(IntegrationEventDefinition definition);
++}
++
++public sealed record ClaimedIntegrationEvent(
++    Guid EventId,
++    string EventType,
++    DateTimeOffset OccurredAt,
++    IntegrationEventEnvelope Envelope);
++
++public interface IIntegrationEventHandler
++{
++    Task HandleAsync(ClaimedIntegrationEvent integrationEvent, CancellationToken cancellationToken);
++}
++
++public interface IOutboxDispatcher
++{
++    Task<OutboxDispatchResult> DispatchBatchAsync(CancellationToken cancellationToken);
++}
++
++public sealed record OutboxDispatchResult(int ClaimedCount, int ProcessedCount, int FailedCount);
++
++public sealed class PermanentIntegrationEventException(string message) : Exception(message);
++
++public sealed record DeadLetterInfo(
++    Guid Id,
++    string MessageType,
++    string Status,
++    DateTimeOffset OccurredAt,
++    int RetryCount,
++    DateTimeOffset? NextRetryAt,
++    string? LastError,
++    string RowVersion);
++
++public sealed record ReprocessDeadLetterCommand(
++    Guid ActorUserId,
++    string Reason,
++    string RowVersion,
++    string? CorrelationId);
++
++public interface IOutboxAdministrationService
++{
++    Task<PagedResult<DeadLetterInfo>> GetDeadLettersAsync(
++        int page,
++        int pageSize,
++        CancellationToken cancellationToken);
++
++    Task<DeadLetterInfo> ReprocessAsync(
++        Guid messageId,
++        ReprocessDeadLetterCommand command,
++        CancellationToken cancellationToken);
++}
++
++public sealed record RecoverableIntegrationEvent(
++    Guid EventId,
++    string EventType,
++    DateTimeOffset OccurredAt,
++    string AggregateType,
++    Guid AggregateId,
++    JsonElement Data);
++
++public sealed record IntegrationEventPage(
++    IReadOnlyList<RecoverableIntegrationEvent> Items,
++    DateTimeOffset? NextOccurredAt,
++    Guid? NextEventId);
++
++public interface IIntegrationEventQueryService
++{
++    Task<IntegrationEventPage> GetEventsAsync(
++        Guid actorUserId,
++        IReadOnlyCollection<string> actorRoles,
++        Guid? deviceId,
++        DateTimeOffset? afterOccurredAt,
++        Guid? afterEventId,
++        int pageSize,
++        CancellationToken cancellationToken);
++}
+diff --git a/GoldInvoice.Contracts/Integration/IntegrationContracts.cs b/GoldInvoice.Contracts/Integration/IntegrationContracts.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..951e4e598e03b67778c14e4a7388008afd033047
+--- /dev/null
++++ b/GoldInvoice.Contracts/Integration/IntegrationContracts.cs
+@@ -0,0 +1,53 @@
++using System.Text.Json;
++
++namespace GoldInvoice.Contracts.Integration;
++
++public sealed class IntegrationEventResponse
++{
++    public Guid EventId { get; init; }
++
++    public string EventType { get; init; } = string.Empty;
++
++    public DateTimeOffset OccurredAt { get; init; }
++
++    public string AggregateType { get; init; } = string.Empty;
++
++    public Guid AggregateId { get; init; }
++
++    public JsonElement Data { get; init; }
++}
++
++public sealed class IntegrationEventPageResponse
++{
++    public IReadOnlyList<IntegrationEventResponse> Items { get; init; } = [];
++
++    public DateTimeOffset? NextOccurredAt { get; init; }
++
++    public Guid? NextEventId { get; init; }
++}
++
++public sealed class DeadLetterResponse
++{
++    public Guid Id { get; init; }
++
++    public string MessageType { get; init; } = string.Empty;
++
++    public string Status { get; init; } = string.Empty;
++
++    public DateTimeOffset OccurredAt { get; init; }
++
++    public int RetryCount { get; init; }
++
++    public DateTimeOffset? NextRetryAt { get; init; }
++
++    public string? LastError { get; init; }
++
++    public string RowVersion { get; init; } = string.Empty;
++}
++
++public sealed class ReprocessDeadLetterRequest
++{
++    public string Reason { get; init; } = string.Empty;
++
++    public string RowVersion { get; init; } = string.Empty;
++}
+diff --git a/GoldInvoice.Domain/Platform/PlatformModels.cs b/GoldInvoice.Domain/Platform/PlatformModels.cs
+index 973ef83a92d3d3d0a4cd6d7d82decadf05e9687e..f1e4a6e4f2b72248368a6738223b163a09a5b717 100644
+--- a/GoldInvoice.Domain/Platform/PlatformModels.cs
++++ b/GoldInvoice.Domain/Platform/PlatformModels.cs
+@@ -47,7 +47,7 @@ public sealed class DesktopDevice : AuditableEntity
+     public DateTimeOffset? RevokedAt { get; private set; }
+ }
+ 
+-public sealed class OutboxMessage : AuditableEntity
++public sealed class OutboxMessage : AuditableEntity, IProtectedFromHardDelete
+ {
+     private OutboxMessage()
+     {
+@@ -80,6 +80,108 @@ public sealed class OutboxMessage : AuditableEntity
+     public Guid? LockId { get; private set; }
+ 
+     public DateTimeOffset? LockedUntil { get; private set; }
++
++    public bool CanBeClaimed(DateTimeOffset now) =>
++        (Status is OutboxMessageStatus.Pending or OutboxMessageStatus.Failed &&
++         (NextRetryAt is null || NextRetryAt <= now)) ||
++        (Status == OutboxMessageStatus.Processing && LockedUntil <= now);
++
++    public void Claim(Guid lockId, DateTimeOffset lockedUntil, DateTimeOffset now)
++    {
++        Guard.AgainstEmpty(lockId, nameof(lockId));
++        Guard.AgainstDefault(lockedUntil, nameof(lockedUntil));
++        Guard.AgainstDefault(now, nameof(now));
++        if (!CanBeClaimed(now) || lockedUntil <= now)
++        {
++            throw new DomainConflictException("The outbox message cannot be claimed.");
++        }
++
++        Status = OutboxMessageStatus.Processing;
++        LockId = lockId;
++        LockedUntil = lockedUntil;
++    }
++
++    public void RenewLock(Guid lockId, DateTimeOffset lockedUntil, DateTimeOffset now)
++    {
++        EnsureLockOwner(lockId, now, requireUnexpiredLock: true);
++        if (lockedUntil <= now)
++        {
++            throw new ArgumentOutOfRangeException(nameof(lockedUntil));
++        }
++
++        LockedUntil = lockedUntil;
++    }
++
++    public void MarkProcessed(Guid lockId, DateTimeOffset processedAt)
++    {
++        EnsureLockOwner(lockId, processedAt, requireUnexpiredLock: false);
++        Status = OutboxMessageStatus.Processed;
++        ProcessedAt = processedAt;
++        NextRetryAt = null;
++        LastError = null;
++        LockId = null;
++        LockedUntil = null;
++    }
++
++    public void MarkFailed(
++        Guid lockId,
++        string failure,
++        DateTimeOffset failedAt,
++        DateTimeOffset? nextRetryAt,
++        bool deadLetter)
++    {
++        EnsureLockOwner(lockId, failedAt, requireUnexpiredLock: false);
++        if (!deadLetter && (nextRetryAt is null || nextRetryAt <= failedAt))
++        {
++            throw new ArgumentOutOfRangeException(nameof(nextRetryAt));
++        }
++
++        RetryCount = checked(RetryCount + 1);
++        LastError = Guard.Required(failure, nameof(failure), 4000);
++        Status = deadLetter ? OutboxMessageStatus.DeadLetter : OutboxMessageStatus.Failed;
++        NextRetryAt = deadLetter ? null : nextRetryAt;
++        LockId = null;
++        LockedUntil = null;
++    }
++
++    public void ReleaseClaim(Guid lockId, DateTimeOffset nextRetryAt, DateTimeOffset releasedAt)
++    {
++        EnsureLockOwner(lockId, releasedAt, requireUnexpiredLock: false);
++        if (nextRetryAt < releasedAt)
++        {
++            throw new ArgumentOutOfRangeException(nameof(nextRetryAt));
++        }
++
++        Status = OutboxMessageStatus.Failed;
++        NextRetryAt = nextRetryAt;
++        LockId = null;
++        LockedUntil = null;
++    }
++
++    public void Reprocess(DateTimeOffset requestedAt)
++    {
++        Guard.AgainstDefault(requestedAt, nameof(requestedAt));
++        if (Status != OutboxMessageStatus.DeadLetter)
++        {
++            throw new DomainConflictException("Only a dead-letter outbox message can be reprocessed.");
++        }
++
++        Status = OutboxMessageStatus.Pending;
++        NextRetryAt = requestedAt;
++        LockId = null;
++        LockedUntil = null;
++    }
++
++    private void EnsureLockOwner(Guid lockId, DateTimeOffset now, bool requireUnexpiredLock)
++    {
++        Guard.AgainstEmpty(lockId, nameof(lockId));
++        Guard.AgainstDefault(now, nameof(now));
++        if (Status != OutboxMessageStatus.Processing || LockId != lockId ||
++            (requireUnexpiredLock && LockedUntil <= now))
++        {
++            throw new DomainConflictException("The outbox processing lock is not owned by this dispatcher.");
++        }
++    }
+ }
+ 
+ public sealed class AuditLog : AuditableEntity, IAppendOnlyEntity, IProtectedFromHardDelete
+@@ -114,6 +216,23 @@ public sealed class AuditLog : AuditableEntity, IAppendOnlyEntity, IProtectedFro
+     public string? OldValuesJson { get; private set; }
+ 
+     public string? NewValuesJson { get; private set; }
++
++    public void SetContext(Guid? actorUserId, string? correlationId)
++    {
++        if (actorUserId == Guid.Empty)
++        {
++            throw new ArgumentException("A non-empty actor identifier is required.", nameof(actorUserId));
++        }
++
++        ActorUserId = actorUserId;
++        CorrelationId = Guard.Optional(correlationId, nameof(correlationId), 128);
++    }
++
++    public void SetValues(string? oldValuesJson, string? newValuesJson)
++    {
++        OldValuesJson = Guard.Optional(oldValuesJson, nameof(oldValuesJson), int.MaxValue);
++        NewValuesJson = Guard.Optional(newValuesJson, nameof(newValuesJson), int.MaxValue);
++    }
+ }
+ 
+ public sealed class SystemSetting : AuditableEntity
+diff --git a/GoldInvoice.Infrastructure/Configuration/OutboxOptions.cs b/GoldInvoice.Infrastructure/Configuration/OutboxOptions.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab47ad3f28236e6bc47a1fff0e6ca884c6d973d9
+--- /dev/null
++++ b/GoldInvoice.Infrastructure/Configuration/OutboxOptions.cs
+@@ -0,0 +1,31 @@
++namespace GoldInvoice.Infrastructure.Configuration;
++
++public sealed class OutboxOptions
++{
++    public const string SectionName = "Outbox";
++
++    public int BatchSize { get; set; } = 50;
++
++    public int PollIntervalMilliseconds { get; set; } = 1000;
++
++    public int LockDurationSeconds { get; set; } = 60;
++
++    public int HeartbeatIntervalSeconds { get; set; } = 20;
++
++    public int MaximumAttempts { get; set; } = 5;
++
++    public int RetryBaseDelaySeconds { get; set; } = 5;
++
++    public int MaximumRetryDelaySeconds { get; set; } = 300;
++
++    public static bool IsValid(OutboxOptions options) =>
++        options.BatchSize is >= 1 and <= 500 &&
++        options.PollIntervalMilliseconds is >= 100 and <= 60_000 &&
++        options.LockDurationSeconds is >= 10 and <= 900 &&
++        options.HeartbeatIntervalSeconds is >= 1 &&
++        options.HeartbeatIntervalSeconds < options.LockDurationSeconds &&
++        options.MaximumAttempts is >= 1 and <= 100 &&
++        options.RetryBaseDelaySeconds is >= 1 and <= 3600 &&
++        options.MaximumRetryDelaySeconds >= options.RetryBaseDelaySeconds &&
++        options.MaximumRetryDelaySeconds <= 86_400;
++}
+diff --git a/GoldInvoice.Infrastructure/DependencyInjection.cs b/GoldInvoice.Infrastructure/DependencyInjection.cs
+index b933d5f7f8bb60d15f9ed15ca5a88a01af895530..d273b6c601f53ddfc673d0b374ebb276a0aaa9c9 100644
+--- a/GoldInvoice.Infrastructure/DependencyInjection.cs
++++ b/GoldInvoice.Infrastructure/DependencyInjection.cs
+@@ -2,6 +2,7 @@ using GoldInvoice.Application.Catalog;
+ using GoldInvoice.Application.Customers;
+ using GoldInvoice.Application.Inventory;
+ using GoldInvoice.Application.Invoicing;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Application.Orders;
+ using GoldInvoice.Application.Payments;
+ using GoldInvoice.Application.Pricing;
+@@ -13,6 +14,7 @@ using GoldInvoice.Infrastructure.Customers;
+ using GoldInvoice.Infrastructure.Identity;
+ using GoldInvoice.Infrastructure.Inventory;
+ using GoldInvoice.Infrastructure.Invoicing;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Orders;
+ using GoldInvoice.Infrastructure.Payments;
+ using GoldInvoice.Infrastructure.Persistence;
+@@ -68,8 +70,14 @@ public static class DependencyInjection
+             .Bind(configuration.GetSection(InvoicingOptions.SectionName))
+             .Validate(InvoicingOptions.IsValid, "Invoice-sequence settings are invalid.")
+             .ValidateOnStart();
++        services
++            .AddOptions<OutboxOptions>()
++            .Bind(configuration.GetSection(OutboxOptions.SectionName))
++            .Validate(OutboxOptions.IsValid, "Outbox settings are invalid.")
++            .ValidateOnStart();
+ 
+         services.TryAddSingleton(TimeProvider.System);
++        services.AddHttpContextAccessor();
+         services.AddScoped<AuditingSaveChangesInterceptor>();
+         services.AddDbContext<GoldInvoiceDbContext>((serviceProvider, options) =>
+         {
+@@ -102,10 +110,22 @@ public static class DependencyInjection
+         services.AddScoped<IInvoiceService>(provider => provider.GetRequiredService<InvoiceService>());
+         services.AddScoped<IInvoiceIssuanceService>(provider => provider.GetRequiredService<InvoiceService>());
+         services.AddScoped<IPaymentService, PaymentService>();
++        services.AddScoped<IOutboxWriter, OutboxWriter>();
++        services.AddScoped<IOutboxStore, OutboxStore>();
++        services.AddSingleton<IOutboxDispatcher, OutboxDispatcher>();
++        services.AddScoped<IOutboxAdministrationService, OutboxAdministrationService>();
++        services.AddScoped<IIntegrationEventQueryService, IntegrationEventQueryService>();
+ 
+         return services;
+     }
+ 
++    public static IServiceCollection AddOutboxProcessing(this IServiceCollection services)
++    {
++        ArgumentNullException.ThrowIfNull(services);
++        services.AddHostedService<OutboxDispatchHostedService>();
++        return services;
++    }
++
+     public static IServiceCollection AddSecurityInfrastructure(
+         this IServiceCollection services,
+         IConfiguration configuration)
+diff --git a/GoldInvoice.Infrastructure/Integration/IntegrationEventSerializer.cs b/GoldInvoice.Infrastructure/Integration/IntegrationEventSerializer.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..524ff926259a2750d612930092d20de07a82259f
+--- /dev/null
++++ b/GoldInvoice.Infrastructure/Integration/IntegrationEventSerializer.cs
+@@ -0,0 +1,136 @@
++using System.Diagnostics;
++using System.Text.Json;
++using GoldInvoice.Application.Integration;
++using GoldInvoice.Domain.Platform;
++using GoldInvoice.Infrastructure.Persistence;
++using Microsoft.AspNetCore.Http;
++
++namespace GoldInvoice.Infrastructure.Integration;
++
++internal static class IntegrationEventSerializer
++{
++    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
++
++    public static string Serialize(
++        IntegrationEventDefinition definition,
++        IHttpContextAccessor httpContextAccessor)
++    {
++        ArgumentNullException.ThrowIfNull(definition);
++        if (!IntegrationEventTypes.Supported.Contains(definition.EventType) ||
++            string.IsNullOrWhiteSpace(definition.AggregateType) ||
++            definition.AggregateType.Trim().Length > 200 ||
++            definition.AggregateId == Guid.Empty ||
++            definition.OccurredAt == default || definition.Data is null)
++        {
++            throw new ArgumentException("The integration event definition is invalid.", nameof(definition));
++        }
++
++        var audience = NormalizeAudience(definition.Audience);
++        if (audience.UserIds.Count == 0 && audience.Roles.Count == 0 && audience.DeviceIds.Count == 0)
++        {
++            throw new ArgumentException("An integration event requires a bounded audience.", nameof(definition));
++        }
++
++        var envelope = new IntegrationEventEnvelope(
++            definition.AggregateType.Trim(),
++            definition.AggregateId,
++            ResolveCorrelationId(httpContextAccessor),
++            definition.CausationId,
++            audience,
++            JsonSerializer.SerializeToElement(definition.Data, definition.Data.GetType(), SerializerOptions));
++        return JsonSerializer.Serialize(envelope, SerializerOptions);
++    }
++
++    public static ClaimedIntegrationEvent Deserialize(
++        Guid eventId,
++        string eventType,
++        DateTimeOffset occurredAt,
++        string payload)
++    {
++        if (eventId == Guid.Empty || !IntegrationEventTypes.Supported.Contains(eventType) ||
++            occurredAt == default || string.IsNullOrWhiteSpace(payload))
++        {
++            throw new PermanentIntegrationEventException("The outbox message metadata is invalid.");
++        }
++
++        IntegrationEventEnvelope? envelope;
++        try
++        {
++            envelope = JsonSerializer.Deserialize<IntegrationEventEnvelope>(payload, SerializerOptions);
++        }
++        catch (JsonException)
++        {
++            throw new PermanentIntegrationEventException("The outbox payload is not valid JSON.");
++        }
++
++        if (envelope is null || string.IsNullOrWhiteSpace(envelope.AggregateType) ||
++            envelope.AggregateId == Guid.Empty || envelope.Audience is null ||
++            envelope.Data.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
++        {
++            throw new PermanentIntegrationEventException("The outbox event envelope is invalid.");
++        }
++
++        var audience = NormalizeAudience(envelope.Audience);
++        if (audience.UserIds.Count == 0 && audience.Roles.Count == 0 && audience.DeviceIds.Count == 0)
++        {
++            throw new PermanentIntegrationEventException("The outbox event audience is empty.");
++        }
++
++        return new ClaimedIntegrationEvent(
++            eventId,
++            eventType,
++            occurredAt,
++            envelope with { Audience = audience });
++    }
++
++    private static IntegrationEventAudience NormalizeAudience(IntegrationEventAudience audience)
++    {
++        ArgumentNullException.ThrowIfNull(audience);
++        return new IntegrationEventAudience(
++            (audience.UserIds ?? [])
++                .Where(id => id != Guid.Empty)
++                .Distinct()
++                .OrderBy(id => id)
++                .ToArray(),
++            (audience.Roles ?? [])
++                .Where(role => !string.IsNullOrWhiteSpace(role))
++                .Select(role => role.Trim())
++                .Distinct(StringComparer.OrdinalIgnoreCase)
++                .OrderBy(role => role, StringComparer.OrdinalIgnoreCase)
++                .ToArray(),
++            (audience.DeviceIds ?? [])
++                .Where(id => id != Guid.Empty)
++                .Distinct()
++                .OrderBy(id => id)
++                .ToArray());
++    }
++
++    private static string? ResolveCorrelationId(IHttpContextAccessor accessor)
++    {
++        var value = accessor.HttpContext?.TraceIdentifier;
++        if (string.IsNullOrWhiteSpace(value))
++        {
++            value = Activity.Current?.TraceId.ToHexString();
++        }
++
++        return string.IsNullOrWhiteSpace(value)
++            ? null
++            : value.Trim()[..Math.Min(value.Trim().Length, 128)];
++    }
++}
++
++internal sealed class OutboxWriter(
++    GoldInvoiceDbContext dbContext,
++    IHttpContextAccessor httpContextAccessor) : IOutboxWriter
++{
++    public Guid Add(IntegrationEventDefinition definition)
++    {
++        ArgumentNullException.ThrowIfNull(definition);
++        var message = new OutboxMessage(
++            definition.EventType,
++            IntegrationEventSerializer.Serialize(definition, httpContextAccessor),
++            definition.OccurredAt);
++        dbContext.OutboxMessages.Add(message);
++        return message.Id;
++    }
++}
+diff --git a/GoldInvoice.Infrastructure/Integration/OutboxEventExtensions.cs b/GoldInvoice.Infrastructure/Integration/OutboxEventExtensions.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d481d5166d82c065c9ba4112652c4e34023084dd
+--- /dev/null
++++ b/GoldInvoice.Infrastructure/Integration/OutboxEventExtensions.cs
+@@ -0,0 +1,90 @@
++using GoldInvoice.Application.Integration;
++using GoldInvoice.Application.Security;
++using GoldInvoice.Domain.Inventory;
++using GoldInvoice.Domain.Invoicing;
++using GoldInvoice.Domain.Orders;
++using GoldInvoice.Domain.Pricing;
++
++namespace GoldInvoice.Infrastructure.Integration;
++
++internal static class OutboxEventExtensions
++{
++    public static Guid AddInvoiceCreated(
++        this IOutboxWriter writer,
++        Invoice invoice,
++        DateTimeOffset occurredAt) =>
++        writer.Add(new IntegrationEventDefinition(
++            IntegrationEventTypes.InvoiceCreatedV1,
++            nameof(Invoice),
++            invoice.Id,
++            occurredAt,
++            new InvoiceCreatedV1(
++                invoice.Id,
++                invoice.OrderId,
++                invoice.PaymentId!.Value,
++                invoice.InvoiceNumber,
++                invoice.Status.ToString()),
++            ForCustomerAndOperations(invoice.CustomerId)));
++
++    public static Guid AddInventoryChanged(
++        this IOutboxWriter writer,
++        InventoryItem item,
++        StockMovement movement) =>
++        writer.Add(new IntegrationEventDefinition(
++            IntegrationEventTypes.InventoryChangedV1,
++            nameof(InventoryItem),
++            item.Id,
++            movement.OccurredAt,
++            new InventoryChangedV1(
++                item.Id,
++                item.WarehouseId,
++                item.ProductVariantId,
++                movement.InventoryUnitId,
++                movement.Id,
++                movement.MovementType.ToString(),
++                item.QuantityOnHand,
++                item.QuantityReserved,
++                item.QuantityAvailable),
++            ForRoles(SecurityRoles.Owner, SecurityRoles.Admin)));
++
++    public static Guid AddOrderStatusChanged(
++        this IOutboxWriter writer,
++        Order order,
++        OrderStatus? fromStatus,
++        DateTimeOffset occurredAt) =>
++        writer.Add(new IntegrationEventDefinition(
++            IntegrationEventTypes.OrderStatusChangedV1,
++            nameof(Order),
++            order.Id,
++            occurredAt,
++            new OrderStatusChangedV1(
++                order.Id,
++                order.CustomerId,
++                fromStatus?.ToString(),
++                order.Status.ToString()),
++            ForCustomerAndOperations(order.CustomerId)));
++
++    public static Guid AddMarketPriceUpdated(
++        this IOutboxWriter writer,
++        MarketPriceSnapshot snapshot) =>
++        writer.Add(new IntegrationEventDefinition(
++            IntegrationEventTypes.MarketPriceUpdatedV1,
++            nameof(MarketPriceSnapshot),
++            snapshot.Id,
++            snapshot.CapturedAt,
++            new MarketPriceUpdatedV1(
++                snapshot.Id,
++                snapshot.SourceId,
++                snapshot.PriceType.ToString(),
++                snapshot.BuyPriceRials,
++                snapshot.SellPriceRials,
++                snapshot.ProviderTimestamp),
++            ForRoles(SecurityRoles.Owner, SecurityRoles.Admin, SecurityRoles.Customer)));
++
++    private static IntegrationEventAudience ForCustomerAndOperations(Guid customerId) => new(
++        [customerId],
++        [SecurityRoles.Owner, SecurityRoles.Admin],
++        []);
++
++    private static IntegrationEventAudience ForRoles(params string[] roles) => new([], roles, []);
++}
+diff --git a/GoldInvoice.Infrastructure/Integration/OutboxServices.cs b/GoldInvoice.Infrastructure/Integration/OutboxServices.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..003234019c4e4d8b1e603b25a63ee230e2e0527b
+--- /dev/null
++++ b/GoldInvoice.Infrastructure/Integration/OutboxServices.cs
+@@ -0,0 +1,660 @@
++using System.Text.Json;
++using GoldInvoice.Application.Common;
++using GoldInvoice.Application.Integration;
++using GoldInvoice.Domain.Common;
++using GoldInvoice.Domain.Platform;
++using GoldInvoice.Infrastructure.Configuration;
++using GoldInvoice.Infrastructure.Persistence;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Hosting;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++
++namespace GoldInvoice.Infrastructure.Integration;
++
++internal sealed record OutboxClaim(
++    Guid Id,
++    string MessageType,
++    string Payload,
++    DateTimeOffset OccurredAt,
++    int RetryCount);
++
++internal interface IOutboxStore
++{
++    Task<IReadOnlyList<OutboxClaim>> ClaimAsync(
++        Guid lockId,
++        DateTimeOffset now,
++        DateTimeOffset lockedUntil,
++        int batchSize,
++        CancellationToken cancellationToken);
++
++    Task<bool> RenewAsync(
++        Guid messageId,
++        Guid lockId,
++        DateTimeOffset now,
++        DateTimeOffset lockedUntil,
++        CancellationToken cancellationToken);
++
++    Task<bool> CompleteAsync(
++        Guid messageId,
++        Guid lockId,
++        DateTimeOffset processedAt,
++        CancellationToken cancellationToken);
++
++    Task<bool> FailAsync(
++        Guid messageId,
++        Guid lockId,
++        string failure,
++        DateTimeOffset failedAt,
++        DateTimeOffset? nextRetryAt,
++        bool deadLetter,
++        CancellationToken cancellationToken);
++
++    Task ReleaseAsync(
++        Guid messageId,
++        Guid lockId,
++        DateTimeOffset releasedAt,
++        CancellationToken cancellationToken);
++}
++
++internal sealed class OutboxStore(GoldInvoiceDbContext dbContext) : IOutboxStore
++{
++    public async Task<IReadOnlyList<OutboxClaim>> ClaimAsync(
++        Guid lockId,
++        DateTimeOffset now,
++        DateTimeOffset lockedUntil,
++        int batchSize,
++        CancellationToken cancellationToken)
++    {
++        if (dbContext.Database.IsSqlServer())
++        {
++            await dbContext.Database.ExecuteSqlInterpolatedAsync($$"""
++                ;WITH [Claimable] AS
++                (
++                    SELECT TOP ({{batchSize}}) *
++                    FROM [integration].[OutboxMessages] WITH (UPDLOCK, READPAST, ROWLOCK)
++                    WHERE
++                        (([Status] IN ('Pending', 'Failed')) AND
++                         ([NextRetryAt] IS NULL OR [NextRetryAt] <= {{now}}))
++                        OR
++                        ([Status] = 'Processing' AND [LockedUntil] <= {{now}})
++                    ORDER BY [OccurredAt], [Id]
++                )
++                UPDATE [Claimable]
++                SET [Status] = 'Processing',
++                    [LockId] = {{lockId}},
++                    [LockedUntil] = {{lockedUntil}},
++                    [UpdatedAt] = {{now}};
++                """, cancellationToken);
++        }
++        else
++        {
++            var candidates = await dbContext.OutboxMessages
++                .Where(message =>
++                    ((message.Status == OutboxMessageStatus.Pending ||
++                      message.Status == OutboxMessageStatus.Failed) &&
++                     (message.NextRetryAt == null || message.NextRetryAt <= now)) ||
++                    (message.Status == OutboxMessageStatus.Processing && message.LockedUntil <= now))
++                .OrderBy(message => message.OccurredAt)
++                .ThenBy(message => message.Id)
++                .Take(batchSize)
++                .ToListAsync(cancellationToken);
++            foreach (var message in candidates)
++            {
++                message.Claim(lockId, lockedUntil, now);
++            }
++
++            await dbContext.SaveChangesAsync(cancellationToken);
++        }
++
++        return await dbContext.OutboxMessages
++            .AsNoTracking()
++            .Where(message => message.LockId == lockId && message.Status == OutboxMessageStatus.Processing)
++            .OrderBy(message => message.OccurredAt)
++            .ThenBy(message => message.Id)
++            .Select(message => new OutboxClaim(
++                message.Id,
++                message.MessageType,
++                message.Payload,
++                message.OccurredAt,
++                message.RetryCount))
++            .ToListAsync(cancellationToken);
++    }
++
++    public Task<bool> RenewAsync(
++        Guid messageId,
++        Guid lockId,
++        DateTimeOffset now,
++        DateTimeOffset lockedUntil,
++        CancellationToken cancellationToken) =>
++        MutateAsync(
++            messageId,
++            message => message.RenewLock(lockId, lockedUntil, now),
++            cancellationToken);
++
++    public Task<bool> CompleteAsync(
++        Guid messageId,
++        Guid lockId,
++        DateTimeOffset processedAt,
++        CancellationToken cancellationToken) =>
++        MutateAsync(
++            messageId,
++            message => message.MarkProcessed(lockId, processedAt),
++            cancellationToken);
++
++    public Task<bool> FailAsync(
++        Guid messageId,
++        Guid lockId,
++        string failure,
++        DateTimeOffset failedAt,
++        DateTimeOffset? nextRetryAt,
++        bool deadLetter,
++        CancellationToken cancellationToken) =>
++        MutateAsync(
++            messageId,
++            message => message.MarkFailed(lockId, failure, failedAt, nextRetryAt, deadLetter),
++            cancellationToken);
++
++    public async Task ReleaseAsync(
++        Guid messageId,
++        Guid lockId,
++        DateTimeOffset releasedAt,
++        CancellationToken cancellationToken)
++    {
++        await MutateAsync(
++            messageId,
++            message => message.ReleaseClaim(lockId, releasedAt, releasedAt),
++            cancellationToken);
++    }
++
++    private async Task<bool> MutateAsync(
++        Guid messageId,
++        Action<OutboxMessage> mutation,
++        CancellationToken cancellationToken)
++    {
++        dbContext.ChangeTracker.Clear();
++        var message = await dbContext.OutboxMessages.FindAsync([messageId], cancellationToken);
++        if (message is null)
++        {
++            return false;
++        }
++
++        try
++        {
++            mutation(message);
++            await dbContext.SaveChangesAsync(cancellationToken);
++            return true;
++        }
++        catch (DbUpdateConcurrencyException)
++        {
++            return false;
++        }
++        catch (DomainConflictException)
++        {
++            return false;
++        }
++    }
++}
++
++internal sealed partial class OutboxDispatcher(
++    IServiceScopeFactory scopeFactory,
++    IOptions<OutboxOptions> options,
++    TimeProvider timeProvider,
++    ILogger<OutboxDispatcher> logger) : IOutboxDispatcher
++{
++    public async Task<OutboxDispatchResult> DispatchBatchAsync(CancellationToken cancellationToken)
++    {
++        var settings = options.Value;
++        var lockId = Guid.NewGuid();
++        var now = timeProvider.GetUtcNow();
++        IReadOnlyList<OutboxClaim> claims;
++        await using (var scope = scopeFactory.CreateAsyncScope())
++        {
++            claims = await scope.ServiceProvider.GetRequiredService<IOutboxStore>().ClaimAsync(
++                lockId,
++                now,
++                now.AddSeconds(settings.LockDurationSeconds),
++                settings.BatchSize,
++                cancellationToken);
++        }
++
++        var processed = 0;
++        var failed = 0;
++        for (var claimIndex = 0; claimIndex < claims.Count; claimIndex++)
++        {
++            var claim = claims[claimIndex];
++            try
++            {
++                var integrationEvent = IntegrationEventSerializer.Deserialize(
++                    claim.Id,
++                    claim.MessageType,
++                    claim.OccurredAt,
++                    claim.Payload);
++                await HandleWithHeartbeatAsync(integrationEvent, lockId, settings, cancellationToken);
++                if (!await CompleteAsync(claim.Id, lockId, cancellationToken))
++                {
++                    throw new InvalidOperationException("The outbox lock was lost before completion.");
++                }
++
++                processed++;
++            }
++            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++            {
++                for (var releaseIndex = claimIndex; releaseIndex < claims.Count; releaseIndex++)
++                {
++                    await ReleaseAsync(claims[releaseIndex].Id, lockId);
++                }
++
++                throw;
++            }
++            catch (Exception exception)
++            {
++                failed++;
++                var permanent = exception is PermanentIntegrationEventException;
++                var deadLetter = permanent || claim.RetryCount + 1 >= settings.MaximumAttempts;
++                var failedAt = timeProvider.GetUtcNow();
++                var nextRetryAt = deadLetter
++                    ? null
++                    : failedAt.Add(CalculateBackoff(claim.RetryCount, settings));
++                await FailAsync(
++                    claim.Id,
++                    lockId,
++                    SanitizeFailure(exception, permanent),
++                    failedAt,
++                    nextRetryAt,
++                    deadLetter,
++                    CancellationToken.None);
++                DispatchFailed(logger, claim.Id, exception.GetType().Name, deadLetter);
++            }
++        }
++
++        return new OutboxDispatchResult(claims.Count, processed, failed);
++    }
++
++    private async Task HandleWithHeartbeatAsync(
++        ClaimedIntegrationEvent integrationEvent,
++        Guid lockId,
++        OutboxOptions settings,
++        CancellationToken cancellationToken)
++    {
++        await using var handlerScope = scopeFactory.CreateAsyncScope();
++        var handlers = handlerScope.ServiceProvider.GetServices<IIntegrationEventHandler>().ToArray();
++        if (handlers.Length == 0)
++        {
++            throw new PermanentIntegrationEventException("No integration-event handler is registered.");
++        }
++
++        using var handlerCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
++        var handlingTask = Task.WhenAll(handlers.Select(handler =>
++            handler.HandleAsync(integrationEvent, handlerCancellation.Token)));
++        while (!handlingTask.IsCompleted)
++        {
++            var heartbeatDelay = Task.Delay(
++                TimeSpan.FromSeconds(settings.HeartbeatIntervalSeconds),
++                cancellationToken);
++            if (await Task.WhenAny(handlingTask, heartbeatDelay) == handlingTask)
++            {
++                break;
++            }
++
++            var now = timeProvider.GetUtcNow();
++            if (!await RenewAsync(
++                    integrationEvent.EventId,
++                    lockId,
++                    now,
++                    now.AddSeconds(settings.LockDurationSeconds),
++                    cancellationToken))
++            {
++                handlerCancellation.Cancel();
++                throw new InvalidOperationException("The outbox processing lock expired.");
++            }
++        }
++
++        await handlingTask;
++    }
++
++    private async Task<bool> RenewAsync(
++        Guid messageId,
++        Guid lockId,
++        DateTimeOffset now,
++        DateTimeOffset lockedUntil,
++        CancellationToken cancellationToken)
++    {
++        await using var scope = scopeFactory.CreateAsyncScope();
++        return await scope.ServiceProvider.GetRequiredService<IOutboxStore>().RenewAsync(
++            messageId,
++            lockId,
++            now,
++            lockedUntil,
++            cancellationToken);
++    }
++
++    private async Task<bool> CompleteAsync(
++        Guid messageId,
++        Guid lockId,
++        CancellationToken cancellationToken)
++    {
++        await using var scope = scopeFactory.CreateAsyncScope();
++        return await scope.ServiceProvider.GetRequiredService<IOutboxStore>().CompleteAsync(
++            messageId,
++            lockId,
++            timeProvider.GetUtcNow(),
++            cancellationToken);
++    }
++
++    private async Task FailAsync(
++        Guid messageId,
++        Guid lockId,
++        string failure,
++        DateTimeOffset failedAt,
++        DateTimeOffset? nextRetryAt,
++        bool deadLetter,
++        CancellationToken cancellationToken)
++    {
++        await using var scope = scopeFactory.CreateAsyncScope();
++        await scope.ServiceProvider.GetRequiredService<IOutboxStore>().FailAsync(
++            messageId,
++            lockId,
++            failure,
++            failedAt,
++            nextRetryAt,
++            deadLetter,
++            cancellationToken);
++    }
++
++    private async Task ReleaseAsync(Guid messageId, Guid lockId)
++    {
++        await using var scope = scopeFactory.CreateAsyncScope();
++        await scope.ServiceProvider.GetRequiredService<IOutboxStore>().ReleaseAsync(
++            messageId,
++            lockId,
++            timeProvider.GetUtcNow(),
++            CancellationToken.None);
++    }
++
++    private static TimeSpan CalculateBackoff(int retryCount, OutboxOptions settings)
++    {
++        var exponent = Math.Min(retryCount, 30);
++        var seconds = Math.Min(
++            settings.MaximumRetryDelaySeconds,
++            settings.RetryBaseDelaySeconds * Math.Pow(2, exponent));
++        return TimeSpan.FromSeconds(seconds);
++    }
++
++    private static string SanitizeFailure(Exception exception, bool permanent) =>
++        permanent
++            ? exception.Message[..Math.Min(exception.Message.Length, 4000)]
++            : $"Transient delivery failure ({exception.GetType().Name}).";
++
++    [LoggerMessage(
++        EventId = 6101,
++        Level = LogLevel.Warning,
++        Message = "Outbox message {MessageId} failed with {FailureType}; dead letter: {DeadLetter}")]
++    private static partial void DispatchFailed(
++        ILogger logger,
++        Guid messageId,
++        string failureType,
++        bool deadLetter);
++}
++
++public sealed partial class OutboxDispatchHostedService(
++    IOutboxDispatcher dispatcher,
++    IOptions<OutboxOptions> options,
++    ILogger<OutboxDispatchHostedService> logger) : BackgroundService
++{
++    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
++    {
++        while (!stoppingToken.IsCancellationRequested)
++        {
++            try
++            {
++                var result = await dispatcher.DispatchBatchAsync(stoppingToken);
++                if (result.ClaimedCount > 0)
++                {
++                    BatchCompleted(logger, result.ClaimedCount, result.ProcessedCount, result.FailedCount);
++                }
++
++                if (result.ClaimedCount == 0)
++                {
++                    await Task.Delay(
++                        TimeSpan.FromMilliseconds(options.Value.PollIntervalMilliseconds),
++                        stoppingToken);
++                }
++            }
++            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
++            {
++                break;
++            }
++            catch (Exception exception)
++            {
++                LoopFailed(logger, exception.GetType().Name);
++                try
++                {
++                    await Task.Delay(
++                        TimeSpan.FromMilliseconds(options.Value.PollIntervalMilliseconds),
++                        stoppingToken);
++                }
++                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
++                {
++                    break;
++                }
++            }
++        }
++    }
++
++    [LoggerMessage(
++        EventId = 6100,
++        Level = LogLevel.Information,
++        Message = "Outbox batch claimed {ClaimedCount}, processed {ProcessedCount}, and failed {FailedCount} messages")]
++    private static partial void BatchCompleted(
++        ILogger logger,
++        int claimedCount,
++        int processedCount,
++        int failedCount);
++
++    [LoggerMessage(
++        EventId = 6102,
++        Level = LogLevel.Warning,
++        Message = "Outbox dispatch loop failed with {FailureType}")]
++    private static partial void LoopFailed(ILogger logger, string failureType);
++}
++
++internal sealed class OutboxAdministrationService(
++    GoldInvoiceDbContext dbContext,
++    TimeProvider timeProvider) : IOutboxAdministrationService
++{
++    private const int MaximumPageSize = 100;
++
++    public async Task<PagedResult<DeadLetterInfo>> GetDeadLettersAsync(
++        int page,
++        int pageSize,
++        CancellationToken cancellationToken)
++    {
++        ValidatePage(page, pageSize);
++        var query = dbContext.OutboxMessages
++            .AsNoTracking()
++            .Where(message => message.Status == OutboxMessageStatus.DeadLetter);
++        var count = await query.CountAsync(cancellationToken);
++        var messages = await query
++            .OrderByDescending(message => message.UpdatedAt)
++            .ThenBy(message => message.Id)
++            .Skip((page - 1) * pageSize)
++            .Take(pageSize)
++            .ToListAsync(cancellationToken);
++        return new PagedResult<DeadLetterInfo>(
++            messages.Select(Map).ToArray(),
++            page,
++            pageSize,
++            count);
++    }
++
++    public async Task<DeadLetterInfo> ReprocessAsync(
++        Guid messageId,
++        ReprocessDeadLetterCommand command,
++        CancellationToken cancellationToken)
++    {
++        ArgumentNullException.ThrowIfNull(command);
++        if (messageId == Guid.Empty || command.ActorUserId == Guid.Empty ||
++            string.IsNullOrWhiteSpace(command.Reason) || command.Reason.Trim().Length > 1000)
++        {
++            throw new ArgumentException("A valid message, actor, and reason are required.", nameof(command));
++        }
++
++        await using var transaction = await PersistenceUtilities.BeginSerializableTransactionAsync(
++            dbContext,
++            cancellationToken);
++        var message = await dbContext.OutboxMessages.FindAsync([messageId], cancellationToken) ??
++            throw new ApplicationResourceNotFoundException();
++        PersistenceUtilities.SetOriginalRowVersion(dbContext, message, command.RowVersion);
++        var now = timeProvider.GetUtcNow();
++        var oldStatus = message.Status;
++        message.Reprocess(now);
++        var audit = new AuditLog("Outbox.Reprocessed", "OutboxMessage", message.Id.ToString("D"), now);
++        audit.SetContext(command.ActorUserId, command.CorrelationId);
++        audit.SetValues(
++            JsonSerializer.Serialize(new { Status = oldStatus.ToString(), message.RetryCount }),
++            JsonSerializer.Serialize(new
++            {
++                Status = message.Status.ToString(),
++                Reason = command.Reason.Trim(),
++                RequestedAt = now
++            }));
++        dbContext.AuditLogs.Add(audit);
++        await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
++        await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
++        return Map(message);
++    }
++
++    private static DeadLetterInfo Map(OutboxMessage message) => new(
++        message.Id,
++        message.MessageType,
++        message.Status.ToString(),
++        message.OccurredAt,
++        message.RetryCount,
++        message.NextRetryAt,
++        message.LastError,
++        Convert.ToBase64String(message.RowVersion));
++
++    private static void ValidatePage(int page, int pageSize)
++    {
++        if (page < 1 || pageSize is < 1 or > MaximumPageSize ||
++            ((long)page - 1) * pageSize > int.MaxValue)
++        {
++            throw new ArgumentOutOfRangeException(nameof(page));
++        }
++    }
++}
++
++internal sealed class IntegrationEventQueryService(GoldInvoiceDbContext dbContext)
++    : IIntegrationEventQueryService
++{
++    private const int MaximumPageSize = 100;
++    private const int CandidateMultiplier = 10;
++
++    public async Task<IntegrationEventPage> GetEventsAsync(
++        Guid actorUserId,
++        IReadOnlyCollection<string> actorRoles,
++        Guid? deviceId,
++        DateTimeOffset? afterOccurredAt,
++        Guid? afterEventId,
++        int pageSize,
++        CancellationToken cancellationToken)
++    {
++        if (actorUserId == Guid.Empty || pageSize is < 1 or > MaximumPageSize ||
++            (afterOccurredAt is null) != (afterEventId is null))
++        {
++            throw new ArgumentException("The recovery cursor or page size is invalid.");
++        }
++
++        if (deviceId is not null)
++        {
++            var ownsDevice = await dbContext.DesktopDevices.AsNoTracking().AnyAsync(
++                device => device.Id == deviceId &&
++                    device.RegisteredByUserId == actorUserId &&
++                    device.IsActive,
++                cancellationToken);
++            if (!ownsDevice)
++            {
++                throw new ApplicationResourceNotFoundException();
++            }
++        }
++
++        var query = dbContext.OutboxMessages
++            .AsNoTracking()
++            .Where(message => message.Status == OutboxMessageStatus.Processed);
++        if (afterOccurredAt is not null)
++        {
++            query = query.Where(message => message.OccurredAt >= afterOccurredAt.Value);
++        }
++
++        var candidates = await query
++            .OrderBy(message => message.OccurredAt)
++            .ThenBy(message => message.Id)
++            .Take(pageSize * CandidateMultiplier)
++            .Select(message => new
++            {
++                message.Id,
++                message.MessageType,
++                message.Payload,
++                message.OccurredAt
++            })
++            .ToListAsync(cancellationToken);
++        var roles = actorRoles
++            .Where(role => !string.IsNullOrWhiteSpace(role))
++            .ToHashSet(StringComparer.OrdinalIgnoreCase);
++        var visible = new List<RecoverableIntegrationEvent>(pageSize);
++        DateTimeOffset? nextOccurredAt = null;
++        Guid? nextEventId = null;
++        foreach (var candidate in candidates)
++        {
++            if (afterOccurredAt is not null && candidate.OccurredAt == afterOccurredAt &&
++                candidate.Id.CompareTo(afterEventId!.Value) <= 0)
++            {
++                continue;
++            }
++
++            nextOccurredAt = candidate.OccurredAt;
++            nextEventId = candidate.Id;
++
++            ClaimedIntegrationEvent parsed;
++            try
++            {
++                parsed = IntegrationEventSerializer.Deserialize(
++                    candidate.Id,
++                    candidate.MessageType,
++                    candidate.OccurredAt,
++                    candidate.Payload);
++            }
++            catch (PermanentIntegrationEventException)
++            {
++                continue;
++            }
++
++            var audience = parsed.Envelope.Audience;
++            if (!audience.UserIds.Contains(actorUserId) &&
++                !audience.Roles.Any(roles.Contains) &&
++                (deviceId is null || !audience.DeviceIds.Contains(deviceId.Value)))
++            {
++                continue;
++            }
++
++            visible.Add(new RecoverableIntegrationEvent(
++                parsed.EventId,
++                parsed.EventType,
++                parsed.OccurredAt,
++                parsed.Envelope.AggregateType,
++                parsed.Envelope.AggregateId,
++                parsed.Envelope.Data));
++            if (visible.Count == pageSize)
++            {
++                break;
++            }
++        }
++
++        return new IntegrationEventPage(
++            visible,
++            nextOccurredAt,
++            nextEventId);
++    }
++}
+diff --git a/GoldInvoice.Infrastructure/Inventory/InventoryReservationCoordinator.cs b/GoldInvoice.Infrastructure/Inventory/InventoryReservationCoordinator.cs
+index 2e08a44117993d1873c62ea055adaa8d7abad8e5..d768bcbb467ea5176fdace2e47189ec16244f920 100644
+--- a/GoldInvoice.Infrastructure/Inventory/InventoryReservationCoordinator.cs
++++ b/GoldInvoice.Infrastructure/Inventory/InventoryReservationCoordinator.cs
+@@ -1,6 +1,8 @@
+ using GoldInvoice.Application.Common;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Domain.Inventory;
+ using GoldInvoice.Domain.Orders;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Persistence;
+ using Microsoft.EntityFrameworkCore;
+ 
+@@ -8,6 +10,7 @@ namespace GoldInvoice.Infrastructure.Inventory;
+ 
+ internal sealed class InventoryReservationCoordinator(
+     GoldInvoiceDbContext dbContext,
++    IOutboxWriter outboxWriter,
+     TimeProvider timeProvider)
+ {
+     public StockReservation Reserve(
+@@ -45,6 +48,7 @@ internal sealed class InventoryReservationCoordinator(
+             reason: null);
+         dbContext.StockReservations.Add(reservation);
+         dbContext.StockMovements.Add(movement);
++        outboxWriter.AddInventoryChanged(inventoryItem, movement);
+         return reservation;
+     }
+ 
+@@ -124,7 +128,7 @@ internal sealed class InventoryReservationCoordinator(
+             reservation.Confirm(confirmedAt);
+             item.ConfirmReservation(reservation.Quantity);
+             unit?.Sell(confirmedAt);
+-            dbContext.StockMovements.Add(CreateMovement(
++            var movement = CreateMovement(
+                 item,
+                 StockMovementType.ReservationConfirmed,
+                 -reservation.Quantity,
+@@ -132,7 +136,9 @@ internal sealed class InventoryReservationCoordinator(
+                 unit?.Id,
+                 "Payment",
+                 paymentId,
+-                reason: null));
++                reason: null);
++            dbContext.StockMovements.Add(movement);
++            outboxWriter.AddInventoryChanged(item, movement);
+         }
+     }
+ 
+@@ -187,7 +193,7 @@ internal sealed class InventoryReservationCoordinator(
+             reservation.Release(releasedAt);
+             item.ReleaseReservation(reservation.Quantity);
+             unit?.ReleaseReservation();
+-            dbContext.StockMovements.Add(CreateMovement(
++            var movement = CreateMovement(
+                 item,
+                 StockMovementType.ReservationReleased,
+                 quantityDelta: 0,
+@@ -195,7 +201,9 @@ internal sealed class InventoryReservationCoordinator(
+                 unit?.Id,
+                 "OrderCancellation",
+                 orderId,
+-                reason));
++                reason);
++            dbContext.StockMovements.Add(movement);
++            outboxWriter.AddInventoryChanged(item, movement);
+         }
+     }
+ 
+diff --git a/GoldInvoice.Infrastructure/Inventory/InventoryService.cs b/GoldInvoice.Infrastructure/Inventory/InventoryService.cs
+index 407a4e4be9eb1848be07cd13badd9a58c000cfc1..f5e9a1b36740b7d2557ecbc7047cec2a8ae0e1d2 100644
+--- a/GoldInvoice.Infrastructure/Inventory/InventoryService.cs
++++ b/GoldInvoice.Infrastructure/Inventory/InventoryService.cs
+@@ -1,6 +1,8 @@
+ using GoldInvoice.Application.Common;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Application.Inventory;
+ using GoldInvoice.Domain.Inventory;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Persistence;
+ using Microsoft.EntityFrameworkCore;
+ using Microsoft.EntityFrameworkCore.Storage;
+@@ -9,6 +11,7 @@ namespace GoldInvoice.Infrastructure.Inventory;
+ 
+ internal sealed class InventoryService(
+     GoldInvoiceDbContext dbContext,
++    IOutboxWriter outboxWriter,
+     TimeProvider timeProvider) : IInventoryService
+ {
+     private const int MaximumPageSize = 100;
+@@ -169,6 +172,7 @@ internal sealed class InventoryService(
+             command.ReferenceId,
+             command.Reason);
+         dbContext.StockMovements.Add(movement);
++        outboxWriter.AddInventoryChanged(item, movement);
+         await SaveChangesAsync(cancellationToken);
+         await CommitAsync(transaction, cancellationToken);
+         return MapInventoryItem(item);
+@@ -201,6 +205,7 @@ internal sealed class InventoryService(
+         movement.SetReference("InventoryAdjustment", adjustment.Id, command.Reason);
+         dbContext.StockMovements.Add(movement);
+         dbContext.InventoryAdjustments.Add(adjustment);
++        outboxWriter.AddInventoryChanged(item, movement);
+         await SaveChangesAsync(cancellationToken);
+         await CommitAsync(transaction, cancellationToken);
+         return MapInventoryItem(item);
+@@ -280,6 +285,7 @@ internal sealed class InventoryService(
+             reason: null);
+         dbContext.InventoryUnits.Add(unit);
+         dbContext.StockMovements.Add(movement);
++        outboxWriter.AddInventoryChanged(item, movement);
+         await SaveChangesAsync(cancellationToken);
+         await CommitAsync(transaction, cancellationToken);
+         return MapInventoryUnit(unit);
+@@ -353,6 +359,7 @@ internal sealed class InventoryService(
+             reason: null);
+         dbContext.StockReservations.Add(reservation);
+         dbContext.StockMovements.Add(movement);
++        outboxWriter.AddInventoryChanged(item, movement);
+         await SaveChangesAsync(cancellationToken);
+         await CommitAsync(transaction, cancellationToken);
+         return MapReservation(reservation);
+@@ -426,8 +433,7 @@ internal sealed class InventoryService(
+         source.Adjust(-command.Quantity);
+         destination.Receive(command.Quantity);
+         var transferId = Guid.NewGuid();
+-        dbContext.StockMovements.AddRange(
+-            CreateMovement(
++        var sourceMovement = CreateMovement(
+                 source,
+                 StockMovementType.TransferOut,
+                 -command.Quantity,
+@@ -435,8 +441,8 @@ internal sealed class InventoryService(
+                 null,
+                 "InventoryTransfer",
+                 transferId,
+-                null),
+-            CreateMovement(
++                null);
++        var destinationMovement = CreateMovement(
+                 destination,
+                 StockMovementType.TransferIn,
+                 command.Quantity,
+@@ -444,7 +450,10 @@ internal sealed class InventoryService(
+                 null,
+                 "InventoryTransfer",
+                 transferId,
+-                null));
++                null);
++        dbContext.StockMovements.AddRange(sourceMovement, destinationMovement);
++        outboxWriter.AddInventoryChanged(source, sourceMovement);
++        outboxWriter.AddInventoryChanged(destination, destinationMovement);
+         await SaveChangesAsync(cancellationToken);
+         await CommitAsync(transaction, cancellationToken);
+     }
+@@ -482,8 +491,7 @@ internal sealed class InventoryService(
+         destination.Receive(1);
+         unit.TransferTo(destination.WarehouseId, destination.Id);
+         var transferId = Guid.NewGuid();
+-        dbContext.StockMovements.AddRange(
+-            CreateMovement(
++        var sourceMovement = CreateMovement(
+                 source,
+                 StockMovementType.TransferOut,
+                 -1,
+@@ -491,8 +499,8 @@ internal sealed class InventoryService(
+                 unit.Id,
+                 "InventoryUnitTransfer",
+                 transferId,
+-                null),
+-            CreateMovement(
++                null);
++        var destinationMovement = CreateMovement(
+                 destination,
+                 StockMovementType.TransferIn,
+                 1,
+@@ -500,7 +508,10 @@ internal sealed class InventoryService(
+                 unit.Id,
+                 "InventoryUnitTransfer",
+                 transferId,
+-                null));
++                null);
++        dbContext.StockMovements.AddRange(sourceMovement, destinationMovement);
++        outboxWriter.AddInventoryChanged(source, sourceMovement);
++        outboxWriter.AddInventoryChanged(destination, destinationMovement);
+         await SaveChangesAsync(cancellationToken);
+         await CommitAsync(transaction, cancellationToken);
+         return MapInventoryUnit(unit);
+@@ -556,7 +567,7 @@ internal sealed class InventoryService(
+                 unit.ReleaseReservation();
+             }
+ 
+-            dbContext.StockMovements.Add(CreateMovement(
++            var movement = CreateMovement(
+                 item,
+                 StockMovementType.ReservationReleased,
+                 quantityDelta: 0,
+@@ -564,7 +575,9 @@ internal sealed class InventoryService(
+                 unit?.Id,
+                 referenceType: "StockReservationExpiration",
+                 referenceId: reservation.Id,
+-                reason: null));
++                reason: null);
++            dbContext.StockMovements.Add(movement);
++            outboxWriter.AddInventoryChanged(item, movement);
+         }
+ 
+         await SaveChangesAsync(cancellationToken);
+@@ -612,7 +625,7 @@ internal sealed class InventoryService(
+             unit?.ReleaseReservation();
+         }
+ 
+-        dbContext.StockMovements.Add(CreateMovement(
++        var movement = CreateMovement(
+             item,
+             confirm ? StockMovementType.ReservationConfirmed : StockMovementType.ReservationReleased,
+             quantityDelta: confirm ? -reservation.Quantity : 0,
+@@ -620,7 +633,9 @@ internal sealed class InventoryService(
+             unit?.Id,
+             referenceType: "StockReservation",
+             referenceId: reservation.Id,
+-            reason: null));
++            reason: null);
++        dbContext.StockMovements.Add(movement);
++        outboxWriter.AddInventoryChanged(item, movement);
+         await SaveChangesAsync(cancellationToken);
+         await CommitAsync(transaction, cancellationToken);
+         return MapReservation(reservation);
+diff --git a/GoldInvoice.Infrastructure/Invoicing/InvoiceService.cs b/GoldInvoice.Infrastructure/Invoicing/InvoiceService.cs
+index b5e492ba8525a3fdf6b0f34d4678c3805ff64430..0e4bdaa0b20894a0e9e6bb52a76775ff117fb7c9 100644
+--- a/GoldInvoice.Infrastructure/Invoicing/InvoiceService.cs
++++ b/GoldInvoice.Infrastructure/Invoicing/InvoiceService.cs
+@@ -1,10 +1,12 @@
+ using GoldInvoice.Application.Common;
+ using GoldInvoice.Application.Invoicing;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Application.Orders;
+ using GoldInvoice.Domain.Invoicing;
+ using GoldInvoice.Domain.Orders;
+ using GoldInvoice.Domain.Payments;
+ using GoldInvoice.Infrastructure.Configuration;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Orders;
+ using GoldInvoice.Infrastructure.Persistence;
+ using Microsoft.EntityFrameworkCore;
+@@ -15,6 +17,7 @@ namespace GoldInvoice.Infrastructure.Invoicing;
+ internal sealed class InvoiceService(
+     GoldInvoiceDbContext dbContext,
+     IOptions<InvoicingOptions> options,
++    IOutboxWriter outboxWriter,
+     TimeProvider timeProvider) : IInvoiceService, IInvoiceIssuanceService
+ {
+     private const int MaximumPageSize = 100;
+@@ -252,6 +255,7 @@ internal sealed class InvoiceService(
+             store.PhoneNumber,
+             store.PostalCode,
+             store.AddressLine));
++        outboxWriter.AddInvoiceCreated(invoice, issuedAt);
+         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+         return AssertSingle(await MapInvoicesAsync([invoice], cancellationToken));
+diff --git a/GoldInvoice.Infrastructure/Orders/OrderService.cs b/GoldInvoice.Infrastructure/Orders/OrderService.cs
+index fbfbdd1080e9c62c015fa5b0423472e37a68f5f8..47763ab3db641f371809b271eeee4c9455247b4a 100644
+--- a/GoldInvoice.Infrastructure/Orders/OrderService.cs
++++ b/GoldInvoice.Infrastructure/Orders/OrderService.cs
+@@ -1,5 +1,6 @@
+ using System.Text.Json;
+ using GoldInvoice.Application.Common;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Application.Orders;
+ using GoldInvoice.Application.Pricing;
+ using GoldInvoice.Application.Settings;
+@@ -9,6 +10,7 @@ using GoldInvoice.Domain.Orders;
+ using GoldInvoice.Domain.Payments;
+ using GoldInvoice.Domain.Platform;
+ using GoldInvoice.Infrastructure.Inventory;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Persistence;
+ using Microsoft.EntityFrameworkCore;
+ 
+@@ -19,6 +21,7 @@ internal sealed class OrderService(
+     IProductPricingService pricingService,
+     IStoreProfileService storeProfileService,
+     InventoryReservationCoordinator reservationCoordinator,
++    IOutboxWriter outboxWriter,
+     TimeProvider timeProvider) : IOrderService
+ {
+     private const int MaximumPageSize = 100;
+@@ -279,6 +282,7 @@ internal sealed class OrderService(
+             OrderStatus.Pending,
+             now,
+             command.ActorUserId));
++        outboxWriter.AddOrderStatusChanged(order, fromStatus: null, now);
+ 
+         var expiresAt = now.AddMinutes(command.ReservationLifetimeMinutes);
+         foreach (var draft in drafts)
+@@ -321,6 +325,7 @@ internal sealed class OrderService(
+             OrderStatus.AwaitingPayment,
+             now,
+             command.ActorUserId));
++        outboxWriter.AddOrderStatusChanged(order, OrderStatus.Pending, now);
+         idempotencyRecord.Complete(201, order.Id.ToString("D"), now);
+         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+@@ -380,6 +385,7 @@ internal sealed class OrderService(
+             now,
+             command.ActorUserId,
+             command.Reason));
++        outboxWriter.AddOrderStatusChanged(order, fromStatus, now);
+         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+         return await GetOrderAsync(
+@@ -419,13 +425,15 @@ internal sealed class OrderService(
+             order.Complete();
+         }
+ 
++        var changedAt = timeProvider.GetUtcNow();
+         dbContext.OrderStatusHistory.Add(new OrderStatusHistory(
+             order.Id,
+             fromStatus,
+             order.Status,
+-            timeProvider.GetUtcNow(),
++            changedAt,
+             command.ActorUserId,
+             command.Reason));
++        outboxWriter.AddOrderStatusChanged(order, fromStatus, changedAt);
+         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+         return await GetOrderAsync(order.Id, command.ActorUserId, canReadAll: true, cancellationToken);
+diff --git a/GoldInvoice.Infrastructure/Payments/PaymentService.cs b/GoldInvoice.Infrastructure/Payments/PaymentService.cs
+index e2d94c6d7fba4ad61e2efb66a30e8f4a6db1b263..e37514cc140c00da77477ff1687eb98aed601842 100644
+--- a/GoldInvoice.Infrastructure/Payments/PaymentService.cs
++++ b/GoldInvoice.Infrastructure/Payments/PaymentService.cs
+@@ -1,10 +1,12 @@
+ using GoldInvoice.Application.Common;
+ using GoldInvoice.Application.Invoicing;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Application.Payments;
+ using GoldInvoice.Domain.Orders;
+ using GoldInvoice.Domain.Payments;
+ using GoldInvoice.Infrastructure.Configuration;
+ using GoldInvoice.Infrastructure.Inventory;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Persistence;
+ using Microsoft.EntityFrameworkCore;
+ using Microsoft.Extensions.Logging;
+@@ -17,6 +19,7 @@ internal sealed class PaymentService(
+     IEnumerable<IPaymentGatewayProvider> providers,
+     InventoryReservationCoordinator reservationCoordinator,
+     IInvoiceIssuanceService invoiceIssuanceService,
++    IOutboxWriter outboxWriter,
+     IOptions<PaymentProcessingOptions> options,
+     TimeProvider timeProvider,
+     ILogger<PaymentService> logger) : IPaymentService
+@@ -395,6 +398,7 @@ internal sealed class PaymentService(
+             now,
+             command.ActorUserId,
+             "Manual payment verified"));
++        outboxWriter.AddOrderStatusChanged(order, fromStatus, now);
+         await reservationCoordinator.ConfirmForPaymentAsync(
+             order.Id,
+             payment.Id,
+@@ -654,6 +658,7 @@ internal sealed class PaymentService(
+             now,
+             changedBy: null,
+             reason: "Verified payment callback"));
++        outboxWriter.AddOrderStatusChanged(order, previousStatus, now);
+         await reservationCoordinator.ConfirmForPaymentAsync(
+             order.Id,
+             payment.Id,
+@@ -778,6 +783,7 @@ internal sealed class PaymentService(
+                 occurredAt,
+                 changedBy: null,
+                 reason: reason));
++            outboxWriter.AddOrderStatusChanged(order, fromStatus, occurredAt);
+         }
+     }
+ 
+diff --git a/GoldInvoice.Infrastructure/Pricing/MarketPriceIngestionService.cs b/GoldInvoice.Infrastructure/Pricing/MarketPriceIngestionService.cs
+index af4a43f6d5f131e054569d4bf5732d8b986c7636..4fdee7b1d6842162df3034d8e86b4c8a257616b1 100644
+--- a/GoldInvoice.Infrastructure/Pricing/MarketPriceIngestionService.cs
++++ b/GoldInvoice.Infrastructure/Pricing/MarketPriceIngestionService.cs
+@@ -1,9 +1,11 @@
+ using System.Security.Cryptography;
+ using System.Text;
+ using GoldInvoice.Application.Common;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Application.Pricing;
+ using GoldInvoice.Domain.Pricing;
+ using GoldInvoice.Infrastructure.Configuration;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Persistence;
+ using Microsoft.EntityFrameworkCore;
+ using Microsoft.Extensions.Logging;
+@@ -15,6 +17,7 @@ internal sealed partial class MarketPriceIngestionService(
+     GoldInvoiceDbContext dbContext,
+     IEnumerable<IMarketPriceProvider> providers,
+     IOptions<MarketPriceOptions> options,
++    IOutboxWriter outboxWriter,
+     TimeProvider timeProvider,
+     ILogger<MarketPriceIngestionService> logger) : IMarketPriceIngestionService
+ {
+@@ -103,7 +106,7 @@ internal sealed partial class MarketPriceIngestionService(
+             }
+ 
+             var validationStatus = ValidateQuote(quote, capturedAt, options.Value);
+-            dbContext.MarketPriceSnapshots.Add(new MarketPriceSnapshot(
++            var snapshot = new MarketPriceSnapshot(
+                 source.Id,
+                 quote.PriceType,
+                 Math.Max(0, quote.BuyPriceRials),
+@@ -112,7 +115,13 @@ internal sealed partial class MarketPriceIngestionService(
+                 quote.ProviderTimestamp,
+                 validationStatus == MarketPriceValidationStatus.Accepted,
+                 validationStatus,
+-                rawPayloadHash));
++                rawPayloadHash);
++            dbContext.MarketPriceSnapshots.Add(snapshot);
++            if (validationStatus == MarketPriceValidationStatus.Accepted)
++            {
++                outboxWriter.AddMarketPriceUpdated(snapshot);
++            }
++
+             added++;
+         }
+ 
+diff --git a/GoldInvoice.IntegrationTests/PhaseFiveWorkflowTests.cs b/GoldInvoice.IntegrationTests/PhaseFiveWorkflowTests.cs
+index 36a9bd8e7367d4d27fdf6aa95455445c5e0991a7..8b53b61e92ba35f444fedae7926c964601d4e106 100644
+--- a/GoldInvoice.IntegrationTests/PhaseFiveWorkflowTests.cs
++++ b/GoldInvoice.IntegrationTests/PhaseFiveWorkflowTests.cs
+@@ -3,6 +3,7 @@ using GoldInvoice.Application.Common;
+ using GoldInvoice.Application.Customers;
+ using GoldInvoice.Application.Inventory;
+ using GoldInvoice.Application.Invoicing;
++using GoldInvoice.Application.Integration;
+ using GoldInvoice.Application.Orders;
+ using GoldInvoice.Application.Payments;
+ using GoldInvoice.Application.Pricing;
+@@ -18,6 +19,7 @@ using GoldInvoice.Infrastructure.Customers;
+ using GoldInvoice.Infrastructure.Identity;
+ using GoldInvoice.Infrastructure.Inventory;
+ using GoldInvoice.Infrastructure.Invoicing;
++using GoldInvoice.Infrastructure.Integration;
+ using GoldInvoice.Infrastructure.Orders;
+ using GoldInvoice.Infrastructure.Payments;
+ using GoldInvoice.Infrastructure.Persistence;
+@@ -25,6 +27,7 @@ using GoldInvoice.Infrastructure.Persistence.Interceptors;
+ using GoldInvoice.Infrastructure.Pricing;
+ using GoldInvoice.Infrastructure.Settings;
+ using Microsoft.EntityFrameworkCore;
++using Microsoft.AspNetCore.Http;
+ using Microsoft.Extensions.Logging.Abstractions;
+ using Microsoft.Extensions.Options;
+ 
+@@ -63,6 +66,14 @@ public sealed class PhaseFiveWorkflowTests
+             (await scenario.Context.StockReservations.SingleAsync()).Status);
+         Assert.Equal(0, (await scenario.Context.InventoryItems.SingleAsync()).QuantityOnHand);
+         Assert.Equal(OrderStatus.Paid, (await scenario.Context.Orders.SingleAsync()).Status);
++        var outbox = await scenario.Context.OutboxMessages.AsNoTracking().ToListAsync();
++        Assert.Equal(7, outbox.Count);
++        Assert.Single(outbox.Where(message =>
++            message.MessageType == IntegrationEventTypes.InvoiceCreatedV1));
++        Assert.Equal(3, outbox.Count(message =>
++            message.MessageType == IntegrationEventTypes.OrderStatusChangedV1));
++        Assert.Equal(3, outbox.Count(message =>
++            message.MessageType == IntegrationEventTypes.InventoryChangedV1));
+     }
+ 
+     [Fact]
+@@ -283,6 +294,7 @@ public sealed class PhaseFiveWorkflowTests
+     {
+         await using var scenario = await CreateScenarioAsync(createOrder: false);
+         var command = scenario.CreateOrderCommand("order-idempotency-key-200");
++        var outboxCountBefore = await scenario.Context.OutboxMessages.CountAsync();
+ 
+         var first = await scenario.OrderService.CreateOrderAsync(command, CancellationToken.None);
+         var duplicate = await scenario.OrderService.CreateOrderAsync(command, CancellationToken.None);
+@@ -292,6 +304,9 @@ public sealed class PhaseFiveWorkflowTests
+         Assert.Single(await scenario.Context.OrderItems.ToListAsync());
+         Assert.Single(await scenario.Context.StockReservations.ToListAsync());
+         Assert.Single(await scenario.Context.IdempotencyRecords.ToListAsync());
++        Assert.Equal(
++            outboxCountBefore + 3,
++            await scenario.Context.OutboxMessages.CountAsync());
+     }
+ 
+     [Fact]
+@@ -301,7 +316,10 @@ public sealed class PhaseFiveWorkflowTests
+         var product = await scenario.Context.Products.SingleAsync();
+         var variant = await scenario.Context.ProductVariants.SingleAsync();
+         var warehouse = await scenario.Context.Warehouses.SingleAsync();
+-        var inventory = new InventoryService(scenario.Context, scenario.TimeProvider);
++        var inventory = new InventoryService(
++            scenario.Context,
++            TestOutboxWriter.Instance,
++            scenario.TimeProvider);
+         var firstUnit = await inventory.ReceiveInventoryUnitAsync(
+             new ReceiveInventoryUnitCommand(
+                 product.Id,
+@@ -375,7 +393,10 @@ public sealed class PhaseFiveWorkflowTests
+         await using var scenario = await CreateScenarioAsync();
+         var reservation = await scenario.Context.StockReservations.SingleAsync();
+         var inventoryItem = await scenario.Context.InventoryItems.SingleAsync();
+-        var inventory = new InventoryService(scenario.Context, scenario.TimeProvider);
++        var inventory = new InventoryService(
++            scenario.Context,
++            TestOutboxWriter.Instance,
++            scenario.TimeProvider);
+ 
+         await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+             inventory.ConfirmReservationAsync(
+@@ -559,7 +580,8 @@ public sealed class PhaseFiveWorkflowTests
+         var warehouse = new Warehouse("MAIN", "Main warehouse");
+         context.Warehouses.Add(warehouse);
+         await context.SaveChangesAsync();
+-        var inventory = new InventoryService(context, timeProvider);
++        var outboxWriter = new OutboxWriter(context, new HttpContextAccessor());
++        var inventory = new InventoryService(context, outboxWriter, timeProvider);
+         var inventoryItem = await inventory.ReceiveStockAsync(
+             new ReceiveStockCommand(
+                 warehouse.Id,
+@@ -569,16 +591,18 @@ public sealed class PhaseFiveWorkflowTests
+                 Guid.NewGuid(),
+                 null),
+             CancellationToken.None);
+-        var coordinator = new InventoryReservationCoordinator(context, timeProvider);
++        var coordinator = new InventoryReservationCoordinator(context, outboxWriter, timeProvider);
+         var orderService = new OrderService(
+             context,
+             pricing,
+             storeService,
+             coordinator,
++            outboxWriter,
+             timeProvider);
+         var invoiceService = new InvoiceService(
+             context,
+             Options.Create(new InvoicingOptions()),
++            outboxWriter,
+             timeProvider);
+         var scenario = new Scenario(
+             context,
+@@ -588,6 +612,7 @@ public sealed class PhaseFiveWorkflowTests
+             orderService,
+             coordinator,
+             invoiceService,
++            outboxWriter,
+             timeProvider);
+         if (createOrder)
+         {
+@@ -616,6 +641,7 @@ public sealed class PhaseFiveWorkflowTests
+         OrderService orderService,
+         InventoryReservationCoordinator coordinator,
+         InvoiceService invoiceService,
++        IOutboxWriter outboxWriter,
+         TimeProvider timeProvider) : IAsyncDisposable
+     {
+         public GoldInvoiceDbContext Context { get; } = context;
+@@ -649,6 +675,7 @@ public sealed class PhaseFiveWorkflowTests
+             providers,
+             coordinator,
+             invoiceService,
++            outboxWriter,
+             Options.Create(new PaymentProcessingOptions
+             {
+                 ProviderTimeoutSeconds = 2,
+diff --git a/GoldInvoice.IntegrationTests/PhaseFourWorkflowTests.cs b/GoldInvoice.IntegrationTests/PhaseFourWorkflowTests.cs
+index 49f9a272df2ece60779a98394cb1321d68f96d0f..71dd7b341fd59595b87cb4fd9933d910d54cbf50 100644
+--- a/GoldInvoice.IntegrationTests/PhaseFourWorkflowTests.cs
++++ b/GoldInvoice.IntegrationTests/PhaseFourWorkflowTests.cs
+@@ -117,15 +117,18 @@ public sealed class PhaseFourWorkflowTests
+                 "MarketProviders:Fake"),
+             CancellationToken.None);
+         var provider = new FakeMarketPriceProvider(FixedNow, failuresBeforeSuccess: 1);
++        var outboxWriter = new TestOutboxWriter();
+         var ingestion = new MarketPriceIngestionService(
+             context,
+             [provider],
+             options,
++            outboxWriter,
+             timeProvider,
+             NullLogger<MarketPriceIngestionService>.Instance);
+ 
+         var stored = await ingestion.PollSourceAsync("fake", CancellationToken.None);
+         var duplicateStored = await ingestion.PollSourceAsync("fake", CancellationToken.None);
++        Assert.Single(outboxWriter.Events);
+         var rule = await pricing.CreateRuleAsync(
+             new CreateProductPricingRuleCommand(
+                 variant.Id,
+@@ -199,10 +202,12 @@ public sealed class PhaseFourWorkflowTests
+                 0,
+                 FixedNow,
+                 new string('B', 64)));
++        var outboxWriter = new TestOutboxWriter();
+         var ingestion = new MarketPriceIngestionService(
+             context,
+             [provider],
+             options,
++            outboxWriter,
+             timeProvider,
+             NullLogger<MarketPriceIngestionService>.Instance);
+ 
+@@ -211,6 +216,7 @@ public sealed class PhaseFourWorkflowTests
+         Assert.False(snapshot.IsValid);
+         Assert.Equal(MarketPriceValidationStatus.NonPositive, snapshot.ValidationStatus);
+         Assert.Equal(0, snapshot.BuyPriceRials);
++        Assert.Empty(outboxWriter.Events);
+         await Assert.ThrowsAsync<ApplicationResourceNotFoundException>(() =>
+             pricing.GetLatestMarketPriceAsync(MarketPriceType.Gold18K, CancellationToken.None));
+     }
+@@ -227,7 +233,7 @@ public sealed class PhaseFourWorkflowTests
+         var order = new Order(Guid.NewGuid(), "ORDER-001", 1_000_000, 0, 0);
+         context.AddRange(warehouse, order);
+         await context.SaveChangesAsync();
+-        var inventory = new InventoryService(context, timeProvider);
++        var inventory = new InventoryService(context, TestOutboxWriter.Instance, timeProvider);
+         var item = await inventory.ReceiveStockAsync(
+             new ReceiveStockCommand(warehouse.Id, variant.Id, 3, "Purchase", Guid.NewGuid(), null),
+             CancellationToken.None);
+@@ -288,7 +294,7 @@ public sealed class PhaseFourWorkflowTests
+         var destinationWarehouse = new Warehouse("DEST", "Destination warehouse");
+         context.AddRange(sourceWarehouse, destinationWarehouse);
+         await context.SaveChangesAsync();
+-        var inventory = new InventoryService(context, timeProvider);
++        var inventory = new InventoryService(context, TestOutboxWriter.Instance, timeProvider);
+ 
+         var received = await inventory.ReceiveInventoryUnitAsync(
+             new ReceiveInventoryUnitCommand(
+diff --git a/GoldInvoice.IntegrationTests/PhaseSixApiTests.cs b/GoldInvoice.IntegrationTests/PhaseSixApiTests.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..494e69ebc9463b558bd09afc5d205cb7d829770f
+--- /dev/null
++++ b/GoldInvoice.IntegrationTests/PhaseSixApiTests.cs
+@@ -0,0 +1,58 @@
++using System.Reflection;
++using GoldInvoice.Api.Controllers;
++using GoldInvoice.Api.Integration;
++using GoldInvoice.Application.Integration;
++using GoldInvoice.Application.Security;
++using Microsoft.AspNetCore.Authorization;
++
++namespace GoldInvoice.IntegrationTests;
++
++public sealed class PhaseSixApiTests
++{
++    [Fact]
++    public void IntegrationHub_IsAuthorizedAndExposesNoArbitraryGroupJoinMethod()
++    {
++        Assert.NotNull(typeof(IntegrationHub).GetCustomAttribute<AuthorizeAttribute>());
++        var declaredPublicMethods = typeof(IntegrationHub)
++            .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
++
++        Assert.Collection(
++            declaredPublicMethods,
++            method => Assert.Equal(nameof(IntegrationHub.OnConnectedAsync), method.Name));
++    }
++
++    [Fact]
++    public void DeadLetterOperations_RequireExplicitReprocessPermission()
++    {
++        var methods = typeof(IntegrationController)
++            .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
++            .Where(method => method.Name is "GetDeadLetters" or "Reprocess")
++            .ToArray();
++
++        Assert.Equal(2, methods.Length);
++        Assert.All(methods, method => Assert.Contains(
++            method.GetCustomAttributes<AuthorizeAttribute>(),
++            attribute => attribute.Policy == SecurityPermissions.OutboxReprocess));
++    }
++
++    [Fact]
++    public void VersionedRealtimeContracts_ExcludeCustomerIdentityAndProviderSecrets()
++    {
++        var publicPropertyNames = new[]
++            {
++                typeof(InvoiceCreatedV1),
++                typeof(InventoryChangedV1),
++                typeof(OrderStatusChangedV1),
++                typeof(MarketPriceUpdatedV1)
++            }
++            .SelectMany(type => type.GetProperties())
++            .Select(property => property.Name)
++            .ToHashSet(StringComparer.OrdinalIgnoreCase);
++
++        Assert.DoesNotContain("CustomerName", publicPropertyNames);
++        Assert.DoesNotContain("NationalId", publicPropertyNames);
++        Assert.DoesNotContain("ConfigurationReference", publicPropertyNames);
++        Assert.DoesNotContain("RawPayload", publicPropertyNames);
++        Assert.DoesNotContain("Secret", publicPropertyNames);
++    }
++}
+diff --git a/GoldInvoice.IntegrationTests/PhaseSixWorkflowTests.cs b/GoldInvoice.IntegrationTests/PhaseSixWorkflowTests.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..cfd4b11569f7dfef7299be8540812746bf69e019
+--- /dev/null
++++ b/GoldInvoice.IntegrationTests/PhaseSixWorkflowTests.cs
+@@ -0,0 +1,256 @@
++using GoldInvoice.Application.Integration;
++using GoldInvoice.Domain.Platform;
++using GoldInvoice.Infrastructure.Configuration;
++using GoldInvoice.Infrastructure.Integration;
++using GoldInvoice.Infrastructure.Persistence;
++using Microsoft.AspNetCore.Http;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++using Microsoft.Extensions.Options;
++
++namespace GoldInvoice.IntegrationTests;
++
++public sealed class PhaseSixWorkflowTests
++{
++    private static readonly DateTimeOffset FixedNow =
++        DateTimeOffset.Parse("2026-08-10T20:00:00+00:00");
++
++    [Fact]
++    public async Task Dispatcher_ProcessesVersionedMessageOnceAndPreservesCorrelation()
++    {
++        var handler = new RecordingHandler();
++        await using var provider = CreateProvider(handler);
++        await AddEventAsync(
++            provider,
++            new IntegrationEventAudience([Guid.NewGuid()], [], []),
++            correlationId: "phase-6-correlation");
++        var dispatcher = provider.GetRequiredService<IOutboxDispatcher>();
++
++        var first = await dispatcher.DispatchBatchAsync(CancellationToken.None);
++        var second = await dispatcher.DispatchBatchAsync(CancellationToken.None);
++
++        Assert.Equal(new OutboxDispatchResult(1, 1, 0), first);
++        Assert.Equal(new OutboxDispatchResult(0, 0, 0), second);
++        var delivered = Assert.Single(handler.Events);
++        Assert.Equal("phase-6-correlation", delivered.Envelope.CorrelationId);
++        await using var scope = provider.CreateAsyncScope();
++        var message = await scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>()
++            .OutboxMessages.SingleAsync();
++        Assert.Equal(OutboxMessageStatus.Processed, message.Status);
++        Assert.Equal(0, message.RetryCount);
++    }
++
++    [Fact]
++    public async Task Dispatcher_UsesBoundedRetryAndDeadLettersPermanentContractFailure()
++    {
++        var handler = new RecordingHandler(_ => throw new TimeoutException());
++        await using var provider = CreateProvider(handler);
++        await AddEventAsync(provider, new IntegrationEventAudience([Guid.NewGuid()], [], []));
++        var dispatcher = provider.GetRequiredService<IOutboxDispatcher>();
++
++        var result = await dispatcher.DispatchBatchAsync(CancellationToken.None);
++
++        Assert.Equal(1, result.FailedCount);
++        await using (var scope = provider.CreateAsyncScope())
++        {
++            var message = await scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>()
++                .OutboxMessages.SingleAsync();
++            Assert.Equal(OutboxMessageStatus.Failed, message.Status);
++            Assert.Equal(1, message.RetryCount);
++            Assert.Equal(FixedNow.AddSeconds(2), message.NextRetryAt);
++            Assert.Equal("Transient delivery failure (TimeoutException).", message.LastError);
++        }
++
++        await using var permanentProvider = CreateProvider(new RecordingHandler());
++        await using (var scope = permanentProvider.CreateAsyncScope())
++        {
++            var context = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
++            context.OutboxMessages.Add(new OutboxMessage("unknown.event.v1", "{\"secret\":\"not logged\"}", FixedNow));
++            await context.SaveChangesAsync();
++        }
++
++        await permanentProvider.GetRequiredService<IOutboxDispatcher>()
++            .DispatchBatchAsync(CancellationToken.None);
++        await using (var scope = permanentProvider.CreateAsyncScope())
++        {
++            var message = await scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>()
++                .OutboxMessages.SingleAsync();
++            Assert.Equal(OutboxMessageStatus.DeadLetter, message.Status);
++            Assert.Equal(1, message.RetryCount);
++            Assert.DoesNotContain("secret", message.LastError, StringComparison.OrdinalIgnoreCase);
++        }
++    }
++
++    [Fact]
++    public async Task RecoveryQuery_IsAudienceScopedAndUsesBoundedCursor()
++    {
++        var firstUser = Guid.NewGuid();
++        var secondUser = Guid.NewGuid();
++        await using var provider = CreateProvider(new RecordingHandler());
++        await AddEventAsync(provider, new IntegrationEventAudience([firstUser], [], []));
++        await AddEventAsync(provider, new IntegrationEventAudience([secondUser], [], []));
++        await provider.GetRequiredService<IOutboxDispatcher>()
++            .DispatchBatchAsync(CancellationToken.None);
++
++        await using var scope = provider.CreateAsyncScope();
++        var query = new IntegrationEventQueryService(
++            scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>());
++        var page = await query.GetEventsAsync(
++            firstUser,
++            [],
++            deviceId: null,
++            afterOccurredAt: null,
++            afterEventId: null,
++            pageSize: 10,
++            CancellationToken.None);
++
++        Assert.Single(page.Items);
++        Assert.NotNull(page.NextOccurredAt);
++        Assert.NotNull(page.NextEventId);
++    }
++
++    [Fact]
++    public async Task Dispatcher_CancellationReleasesClaimWithoutConsumingAttempt()
++    {
++        var handler = new BlockingHandler();
++        await using var provider = CreateProvider(handler);
++        await AddEventAsync(provider, new IntegrationEventAudience([Guid.NewGuid()], [], []));
++        using var cancellation = new CancellationTokenSource();
++
++        var dispatch = provider.GetRequiredService<IOutboxDispatcher>()
++            .DispatchBatchAsync(cancellation.Token);
++        await handler.Entered;
++        cancellation.Cancel();
++        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch);
++
++        await using var scope = provider.CreateAsyncScope();
++        var message = await scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>()
++            .OutboxMessages.SingleAsync();
++        Assert.Equal(OutboxMessageStatus.Failed, message.Status);
++        Assert.Equal(0, message.RetryCount);
++        Assert.Null(message.LockId);
++    }
++
++    [Fact]
++    public async Task DeadLetterReprocess_PreservesAttemptsAndWritesAuditLog()
++    {
++        await using var provider = CreateProvider(new RecordingHandler());
++        Guid messageId;
++        await using (var scope = provider.CreateAsyncScope())
++        {
++            var context = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
++            var message = new OutboxMessage("invalid.event.v1", "{}", FixedNow);
++            messageId = message.Id;
++            context.OutboxMessages.Add(message);
++            await context.SaveChangesAsync();
++        }
++
++        await provider.GetRequiredService<IOutboxDispatcher>()
++            .DispatchBatchAsync(CancellationToken.None);
++        await using (var scope = provider.CreateAsyncScope())
++        {
++            var context = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
++            var before = await context.OutboxMessages.AsNoTracking().SingleAsync();
++            var service = new OutboxAdministrationService(context, provider.GetRequiredService<TimeProvider>());
++            var reprocessed = await service.ReprocessAsync(
++                messageId,
++                new ReprocessDeadLetterCommand(
++                    Guid.NewGuid(),
++                    "Contract mapping corrected.",
++                    Convert.ToBase64String(before.RowVersion),
++                    "reprocess-correlation"),
++                CancellationToken.None);
++
++            Assert.Equal(1, reprocessed.RetryCount);
++            Assert.Single(await context.AuditLogs.ToListAsync());
++            Assert.Equal(
++                OutboxMessageStatus.Pending,
++                (await context.OutboxMessages.SingleAsync()).Status);
++        }
++    }
++
++    private static ServiceProvider CreateProvider(IIntegrationEventHandler handler)
++    {
++        var services = new ServiceCollection();
++        services.AddDbContext<GoldInvoiceDbContext>(options =>
++            options.UseInMemoryDatabase($"phase-six-{Guid.NewGuid():N}"));
++        services.AddSingleton<TimeProvider>(new FixedTimeProvider(FixedNow));
++        services.AddSingleton<IOptions<OutboxOptions>>(Options.Create(new OutboxOptions
++        {
++            BatchSize = 10,
++            PollIntervalMilliseconds = 100,
++            LockDurationSeconds = 30,
++            HeartbeatIntervalSeconds = 10,
++            MaximumAttempts = 3,
++            RetryBaseDelaySeconds = 2,
++            MaximumRetryDelaySeconds = 10
++        }));
++        services.AddScoped<IOutboxStore, OutboxStore>();
++        services.AddSingleton<IIntegrationEventHandler>(handler);
++        services.AddSingleton<IOutboxDispatcher, OutboxDispatcher>();
++        services.AddSingleton<ILogger<OutboxDispatcher>>(NullLogger<OutboxDispatcher>.Instance);
++        return services.BuildServiceProvider();
++    }
++
++    private static async Task AddEventAsync(
++        IServiceProvider provider,
++        IntegrationEventAudience audience,
++        string? correlationId = null)
++    {
++        await using var scope = provider.CreateAsyncScope();
++        var context = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
++        var httpContext = correlationId is null
++            ? null
++            : new DefaultHttpContext { TraceIdentifier = correlationId };
++        var writer = new OutboxWriter(
++            context,
++            new HttpContextAccessor { HttpContext = httpContext });
++        writer.Add(new IntegrationEventDefinition(
++            IntegrationEventTypes.OrderStatusChangedV1,
++            "Order",
++            Guid.NewGuid(),
++            FixedNow,
++            new OrderStatusChangedV1(Guid.NewGuid(), Guid.NewGuid(), "Pending", "AwaitingPayment"),
++            audience));
++        await context.SaveChangesAsync();
++    }
++
++    private sealed class RecordingHandler(Action<ClaimedIntegrationEvent>? action = null)
++        : IIntegrationEventHandler
++    {
++        public List<ClaimedIntegrationEvent> Events { get; } = [];
++
++        public Task HandleAsync(
++            ClaimedIntegrationEvent integrationEvent,
++            CancellationToken cancellationToken)
++        {
++            cancellationToken.ThrowIfCancellationRequested();
++            action?.Invoke(integrationEvent);
++            Events.Add(integrationEvent);
++            return Task.CompletedTask;
++        }
++    }
++
++    private sealed class BlockingHandler : IIntegrationEventHandler
++    {
++        private readonly TaskCompletionSource entered = new(
++            TaskCreationOptions.RunContinuationsAsynchronously);
++
++        public Task Entered => entered.Task;
++
++        public async Task HandleAsync(
++            ClaimedIntegrationEvent integrationEvent,
++            CancellationToken cancellationToken)
++        {
++            entered.TrySetResult();
++            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
++        }
++    }
++
++    private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
++    {
++        public override DateTimeOffset GetUtcNow() => value;
++    }
++}
+diff --git a/GoldInvoice.IntegrationTests/TestOutboxWriter.cs b/GoldInvoice.IntegrationTests/TestOutboxWriter.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..07ed95afb37c3087370d5c275c00ac72a0b62920
+--- /dev/null
++++ b/GoldInvoice.IntegrationTests/TestOutboxWriter.cs
+@@ -0,0 +1,17 @@
++using GoldInvoice.Application.Integration;
++using System.Collections.Concurrent;
++
++namespace GoldInvoice.IntegrationTests;
++
++internal sealed class TestOutboxWriter : IOutboxWriter
++{
++    public static TestOutboxWriter Instance { get; } = new();
++
++    public ConcurrentQueue<IntegrationEventDefinition> Events { get; } = new();
++
++    public Guid Add(IntegrationEventDefinition definition)
++    {
++        Events.Enqueue(definition);
++        return Guid.NewGuid();
++    }
++}
+diff --git a/GoldInvoice.UnitTests/PhaseSixDomainTests.cs b/GoldInvoice.UnitTests/PhaseSixDomainTests.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d43f38d8b10d937127d88c76c6d6359c2277541
+--- /dev/null
++++ b/GoldInvoice.UnitTests/PhaseSixDomainTests.cs
+@@ -0,0 +1,96 @@
++using GoldInvoice.Domain.Common;
++using GoldInvoice.Domain.Platform;
++
++namespace GoldInvoice.UnitTests;
++
++public sealed class PhaseSixDomainTests
++{
++    private static readonly DateTimeOffset Now =
++        DateTimeOffset.Parse("2026-08-10T20:00:00+00:00");
++
++    [Fact]
++    public void OutboxMessage_RequiresOwnedLockForCompletionAndSupportsHeartbeat()
++    {
++        var message = CreateMessage();
++        var lockId = Guid.NewGuid();
++        message.Claim(lockId, Now.AddMinutes(1), Now);
++
++        Assert.Throws<DomainConflictException>(() =>
++            message.MarkProcessed(Guid.NewGuid(), Now.AddSeconds(1)));
++
++        message.RenewLock(lockId, Now.AddMinutes(2), Now.AddSeconds(10));
++        message.MarkProcessed(lockId, Now.AddSeconds(20));
++
++        Assert.Equal(OutboxMessageStatus.Processed, message.Status);
++        Assert.Equal(Now.AddSeconds(20), message.ProcessedAt);
++        Assert.Null(message.LockId);
++        Assert.Null(message.LockedUntil);
++    }
++
++    [Fact]
++    public void OutboxMessage_ExpiredLockCanBeRecoveredByAnotherDispatcher()
++    {
++        var message = CreateMessage();
++        var abandonedLock = Guid.NewGuid();
++        var recoveryLock = Guid.NewGuid();
++        message.Claim(abandonedLock, Now.AddSeconds(10), Now);
++
++        message.Claim(recoveryLock, Now.AddMinutes(1), Now.AddSeconds(11));
++
++        Assert.Equal(OutboxMessageStatus.Processing, message.Status);
++        Assert.Equal(recoveryLock, message.LockId);
++        Assert.Throws<DomainConflictException>(() =>
++            message.MarkProcessed(abandonedLock, Now.AddSeconds(12)));
++    }
++
++    [Fact]
++    public void OutboxMessage_RetryDeadLetterAndAuditedReprocessPreserveAttemptCount()
++    {
++        var message = CreateMessage();
++        var firstLock = Guid.NewGuid();
++        message.Claim(firstLock, Now.AddMinutes(1), Now);
++        message.MarkFailed(
++            firstLock,
++            "Transient delivery failure (TimeoutException).",
++            Now.AddSeconds(1),
++            Now.AddSeconds(6),
++            deadLetter: false);
++        Assert.Equal(1, message.RetryCount);
++        Assert.Equal(OutboxMessageStatus.Failed, message.Status);
++
++        var secondLock = Guid.NewGuid();
++        message.Claim(secondLock, Now.AddMinutes(2), Now.AddSeconds(6));
++        message.MarkFailed(
++            secondLock,
++            "The message contract is invalid.",
++            Now.AddSeconds(7),
++            nextRetryAt: null,
++            deadLetter: true);
++        Assert.Equal(2, message.RetryCount);
++        Assert.Equal(OutboxMessageStatus.DeadLetter, message.Status);
++
++        message.Reprocess(Now.AddMinutes(1));
++        Assert.Equal(2, message.RetryCount);
++        Assert.Equal(OutboxMessageStatus.Pending, message.Status);
++        Assert.Equal("The message contract is invalid.", message.LastError);
++    }
++
++    [Fact]
++    public void OutboxMessage_GracefulReleaseDoesNotConsumeRetryAttempt()
++    {
++        var message = CreateMessage();
++        var lockId = Guid.NewGuid();
++        message.Claim(lockId, Now.AddMinutes(1), Now);
++
++        message.ReleaseClaim(lockId, Now.AddSeconds(5), Now.AddSeconds(5));
++
++        Assert.Equal(0, message.RetryCount);
++        Assert.Equal(OutboxMessageStatus.Failed, message.Status);
++        Assert.True(message.CanBeClaimed(Now.AddSeconds(5)));
++    }
++
++    private static OutboxMessage CreateMessage() => new(
++        "invoice.created.v1",
++        "{\"safe\":true}",
++        Now);
++}
+diff --git a/GoldInvoice.Worker/Program.cs b/GoldInvoice.Worker/Program.cs
+index fda09c3db9fc70b37089955e36fb099e2887ada8..9e9c3d20b506b910550cd08be31c3c21afbcef1e 100644
+--- a/GoldInvoice.Worker/Program.cs
++++ b/GoldInvoice.Worker/Program.cs
+@@ -14,7 +14,13 @@ builder.Logging.AddJsonConsole(options =>
+ 
+ builder.Services.AddApplication();
+ builder.Services.AddInfrastructure(builder.Configuration);
+-builder.Services.AddHostedService<Worker>();
++builder.Services
++    .AddOptions<WorkerScheduleOptions>()
++    .Bind(builder.Configuration.GetSection(WorkerScheduleOptions.SectionName))
++    .Validate(WorkerScheduleOptions.IsValid, "Worker schedules are invalid.")
++    .ValidateOnStart();
++builder.Services.AddHostedService<MarketPriceWorker>();
++builder.Services.AddHostedService<ReservationExpirationWorker>();
+ 
+ var host = builder.Build();
+ host.Run();
+diff --git a/GoldInvoice.Worker/Worker.cs b/GoldInvoice.Worker/Worker.cs
+index 10edef3f976672133eaa817eed2df688e813f0ba..7719b4660081ce64fd519f87d15562919ae721f2 100644
+--- a/GoldInvoice.Worker/Worker.cs
++++ b/GoldInvoice.Worker/Worker.cs
+@@ -5,39 +5,93 @@ using Microsoft.Extensions.Options;
+ 
+ namespace GoldInvoice.Worker;
+ 
+-public sealed partial class Worker(
++public sealed class WorkerScheduleOptions
++{
++    public const string SectionName = "Worker";
++
++    public int ReservationSweepIntervalSeconds { get; set; } = 30;
++
++    public static bool IsValid(WorkerScheduleOptions options) =>
++        options.ReservationSweepIntervalSeconds is >= 1 and <= 3600;
++}
++
++public sealed partial class MarketPriceWorker(
+     IServiceScopeFactory scopeFactory,
+     IOptions<MarketPriceOptions> options,
+-    TimeProvider timeProvider,
+-    ILogger<Worker> logger) : BackgroundService
++    ILogger<MarketPriceWorker> logger) : BackgroundService
+ {
+     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+     {
+-        WorkerStarted(logger);
+-        var nextMarketPollAt = DateTimeOffset.MinValue;
++        Started(logger);
+         while (!stoppingToken.IsCancellationRequested)
+         {
+             try
+             {
+                 await using var scope = scopeFactory.CreateAsyncScope();
+                 var ingestion = scope.ServiceProvider.GetRequiredService<IMarketPriceIngestionService>();
++                var storedCount = await ingestion.PollAllAsync(stoppingToken);
++                PollCompleted(logger, storedCount);
++            }
++            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
++            {
++                break;
++            }
++            catch (Exception exception)
++            {
++                PollFailed(logger, exception.GetType().Name);
++            }
++
++            try
++            {
++                await Task.Delay(TimeSpan.FromMinutes(options.Value.PollIntervalMinutes), stoppingToken);
++            }
++            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
++            {
++                break;
++            }
++        }
++
++        Stopped(logger);
++    }
++
++    [LoggerMessage(EventId = 4102, Level = LogLevel.Information, Message = "Market-price worker started")]
++    private static partial void Started(ILogger logger);
++
++    [LoggerMessage(EventId = 4103, Level = LogLevel.Information, Message = "Market-price worker stopped")]
++    private static partial void Stopped(ILogger logger);
++
++    [LoggerMessage(
++        EventId = 4104,
++        Level = LogLevel.Information,
++        Message = "Market-price worker stored {SnapshotCount} snapshots")]
++    private static partial void PollCompleted(ILogger logger, int snapshotCount);
++
++    [LoggerMessage(
++        EventId = 4105,
++        Level = LogLevel.Warning,
++        Message = "Market-price worker failed with {FailureType}")]
++    private static partial void PollFailed(ILogger logger, string failureType);
++}
++
++public sealed partial class ReservationExpirationWorker(
++    IServiceScopeFactory scopeFactory,
++    IOptions<WorkerScheduleOptions> options,
++    ILogger<ReservationExpirationWorker> logger) : BackgroundService
++{
++    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
++    {
++        Started(logger);
++        while (!stoppingToken.IsCancellationRequested)
++        {
++            try
++            {
++                await using var scope = scopeFactory.CreateAsyncScope();
+                 var inventory = scope.ServiceProvider.GetRequiredService<IInventoryService>();
+                 var expiredCount = await inventory.ExpireReservationsAsync(stoppingToken);
+-                var now = timeProvider.GetUtcNow();
+-                var marketPollDue = now >= nextMarketPollAt;
+-                var storedCount = 0;
+-                if (marketPollDue)
+-                {
+-                    storedCount = await ingestion.PollAllAsync(stoppingToken);
+-                    nextMarketPollAt = now.AddMinutes(options.Value.PollIntervalMinutes);
+-                }
+-
+-                if (marketPollDue || expiredCount > 0)
++                if (expiredCount > 0)
+                 {
+-                    PollCompleted(logger, storedCount, expiredCount);
++                    SweepCompleted(logger, expiredCount);
+                 }
+-
+-                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+             }
+             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+             {
+@@ -45,39 +99,39 @@ public sealed partial class Worker(
+             }
+             catch (Exception exception)
+             {
+-                PollFailed(logger, exception.GetType().Name);
+-                try
+-                {
+-                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+-                }
+-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+-                {
+-                    break;
+-                }
++                SweepFailed(logger, exception.GetType().Name);
++            }
++
++            try
++            {
++                await Task.Delay(
++                    TimeSpan.FromSeconds(options.Value.ReservationSweepIntervalSeconds),
++                    stoppingToken);
++            }
++            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
++            {
++                break;
+             }
+         }
+ 
+-        WorkerStopped(logger);
++        Stopped(logger);
+     }
+ 
+-    [LoggerMessage(EventId = 1000, Level = LogLevel.Information, Message = "Background worker started")]
+-    private static partial void WorkerStarted(ILogger logger);
++    [LoggerMessage(EventId = 4200, Level = LogLevel.Information, Message = "Reservation-expiration worker started")]
++    private static partial void Started(ILogger logger);
+ 
+-    [LoggerMessage(EventId = 1001, Level = LogLevel.Information, Message = "Background worker stopped")]
+-    private static partial void WorkerStopped(ILogger logger);
++    [LoggerMessage(EventId = 4201, Level = LogLevel.Information, Message = "Reservation-expiration worker stopped")]
++    private static partial void Stopped(ILogger logger);
+ 
+     [LoggerMessage(
+-        EventId = 4102,
++        EventId = 4202,
+         Level = LogLevel.Information,
+-        Message = "Worker stored {SnapshotCount} market snapshots and expired {ExpiredReservationCount} reservations")]
+-    private static partial void PollCompleted(
+-        ILogger logger,
+-        int snapshotCount,
+-        int expiredReservationCount);
++        Message = "Reservation-expiration worker expired {ExpiredReservationCount} reservations")]
++    private static partial void SweepCompleted(ILogger logger, int expiredReservationCount);
+ 
+     [LoggerMessage(
+-        EventId = 4103,
++        EventId = 4203,
+         Level = LogLevel.Warning,
+-        Message = "Market-price poll failed with {FailureType}")]
+-    private static partial void PollFailed(ILogger logger, string failureType);
++        Message = "Reservation-expiration worker failed with {FailureType}")]
++    private static partial void SweepFailed(ILogger logger, string failureType);
+ }
+diff --git a/GoldInvoice.Worker/appsettings.json b/GoldInvoice.Worker/appsettings.json
+index 025e97bb08ed05d976497893b17a3e9d94c51949..2e5c9b1b2aa5554580a8c58dbffc33e7ff0307c3 100644
+--- a/GoldInvoice.Worker/appsettings.json
++++ b/GoldInvoice.Worker/appsettings.json
+@@ -22,6 +22,18 @@
+     "SequenceSeries": "DEFAULT",
+     "SequencePrefix": "INV"
+   },
++  "Outbox": {
++    "BatchSize": 50,
++    "PollIntervalMilliseconds": 1000,
++    "LockDurationSeconds": 60,
++    "HeartbeatIntervalSeconds": 20,
++    "MaximumAttempts": 5,
++    "RetryBaseDelaySeconds": 5,
++    "MaximumRetryDelaySeconds": 300
++  },
++  "Worker": {
++    "ReservationSweepIntervalSeconds": 30
++  },
+   "Logging": {
+     "LogLevel": {
+       "Default": "Information",
+diff --git a/README.md b/README.md
+index 46782b49a5721f023fb8eda24c8a67b5676c547f..5adcb267f40d50d81855b863281c0c9f2dedb2fa 100644
+--- a/README.md
++++ b/README.md
+@@ -58,6 +58,14 @@ The current seller identity is a typed JSON document under `Store.Profile` in th
+ 
+ Refunds and returns remain deferred until their business and fiscal rules are confirmed. See [`docs/architecture/phase-5-orders-payments-invoices.md`](docs/architecture/phase-5-orders-payments-invoices.md).
+ 
++## Phase 6 worker, outbox, and realtime events
++
++Phase 6 reuses `integration.OutboxMessages` for transactional `invoice.created.v1`, `inventory.changed.v1`, `order.status-changed.v1`, and `market-price.updated.v1` events. The API-hosted dispatcher uses atomic SQL Server claims, expiring locks and heartbeat renewal, capped exponential retry, sanitized failures, dead-lettering, and audited permission-protected reprocessing. No Phase 6 database migration is required.
++
++Authenticated clients connect to `/hubs/integration` and receive the `integrationEvent` SignalR method. User, role, and active owned-device groups are assigned only by the server. Missed hints are recovered through the bounded, audience-scoped `GET /api/v1/integration/events` cursor API. Dead-letter inspection and reprocessing are under `/api/v1/integration/outbox/dead-letters` and require `Outbox.Reprocess`.
++
++The Worker now runs market-price polling and reservation expiration as independent hosted services and schedules. See [`docs/architecture/phase-6-worker-outbox-signalr.md`](docs/architecture/phase-6-worker-outbox-signalr.md).
++
+ ## Configuration
+ 
+ Configuration is supplied by standard .NET providers. Environment variables use double underscores, for example:
+@@ -71,6 +79,10 @@ Jwt__SigningKey=<base64-encoded-random-key-of-at-least-32-bytes>
+ Payments__ProviderTimeoutSeconds=15
+ Invoicing__SequenceSeries=DEFAULT
+ Invoicing__SequencePrefix=INV
++Outbox__BatchSize=50
++Outbox__LockDurationSeconds=60
++Outbox__HeartbeatIntervalSeconds=20
++Worker__ReservationSweepIntervalSeconds=30
+ ```
+ 
+ The default CORS origin list is empty, so cross-origin requests are denied until trusted origins are configured. Plain HTTP origins are accepted only for loopback development hosts.
+@@ -131,4 +143,5 @@ Architecture decisions are recorded in:
+ - [`docs/architecture/phase-3-identity-security.md`](docs/architecture/phase-3-identity-security.md)
+ - [`docs/architecture/phase-4-catalog-pricing-inventory.md`](docs/architecture/phase-4-catalog-pricing-inventory.md)
+ - [`docs/architecture/phase-5-orders-payments-invoices.md`](docs/architecture/phase-5-orders-payments-invoices.md)
++- [`docs/architecture/phase-6-worker-outbox-signalr.md`](docs/architecture/phase-6-worker-outbox-signalr.md)
+ - [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md)
+diff --git a/docs/architecture/phase-6-worker-outbox-signalr.md b/docs/architecture/phase-6-worker-outbox-signalr.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..dd7de4b706fce92441fd1ecb6dd433fe6db2b38f
+--- /dev/null
++++ b/docs/architecture/phase-6-worker-outbox-signalr.md
+@@ -0,0 +1,96 @@
++# Phase 6: Worker, durable outbox, and SignalR
++
++## Scope and result
++
++Phase 6 turns the existing `integration.OutboxMessages` schema foundation into a transactional event pipeline. It adds versioned events for invoice creation, inventory changes, order-status changes, and accepted market-price snapshots; atomic SQL Server claiming; lock recovery and heartbeat renewal; bounded retry and dead-letter behavior; permission-protected reprocessing; authorized SignalR delivery; and an audience-scoped recovery API.
++
++No table or column is added. The existing Outbox columns and indexes are sufficient, so Phase 6 intentionally creates no EF Core migration and does not add an unused Inbox table. SignalR notifications are hints, not the authoritative business state.
++
++## Transactional event production
++
++`IOutboxWriter` adds an `OutboxMessage` to the same tracked `GoldInvoiceDbContext` used by the business use case. The caller saves the state transition and message together and commits the surrounding transaction before any dispatcher can claim it.
++
++The stable message types are:
++
++- `invoice.created.v1`
++- `inventory.changed.v1`
++- `order.status-changed.v1`
++- `market-price.updated.v1`
++
++The envelope contains the aggregate type and ID, correlation and optional causation metadata, a server-generated bounded audience, and a typed data object. The Outbox row ID is the event ID. Payloads deliberately exclude customer names, national IDs, provider configuration references, raw callbacks, credentials, and secrets.
++
++Events are produced by the order, payment/invoice, inventory, reservation, and market-price services before their existing `SaveChanges`/commit boundary. Invalid or rejected market quotes do not emit `market-price.updated.v1`.
++
++## Claim, retry, and shutdown behavior
++
++SQL Server claiming uses one atomic CTE `UPDATE` with `UPDLOCK`, `READPAST`, and `ROWLOCK`. A claim selects due Pending/Failed messages and expired Processing locks, then writes a unique lock ID and expiry. Multiple API instances can therefore compete without intentionally delivering the same active claim.
++
++The dispatcher:
++
++- renews a message lock while a handler runs;
++- marks a message Processed only after every registered handler succeeds;
++- records only sanitized exception classifications for transient failures;
++- uses capped exponential backoff;
++- moves permanent contract failures or exhausted retries to DeadLetter;
++- releases an in-flight claim without consuming an attempt during graceful cancellation;
++- retains retry count and previous failure detail when an operator requests reprocessing.
++
++Dead-letter operations require `Outbox.Reprocess`:
++
++- `GET /api/v1/integration/outbox/dead-letters`
++- `POST /api/v1/integration/outbox/dead-letters/{messageId}/reprocess`
++
++Reprocessing requires a reason and rowversion. It writes an append-only `AuditLog`; retry history is not silently reset. Payload content is not returned by the inspection endpoint.
++
++## SignalR security and recovery
++
++The authorized Hub is exposed at `/hubs/integration`. Group membership is server-owned:
++
++- `user:{user-id}` for the current authenticated subject;
++- `role:{role}` from roles re-resolved during live access-token validation;
++- `device:{device-id}` only when the requested existing Desktop device is active and belongs to the authenticated user.
++
++The Hub exposes no client-callable group-join operation. Browser WebSocket negotiation may supply `access_token` in the query string only for the Hub path; every other API path continues to require the Authorization header.
++
++The client receives the `integrationEvent` method with the event ID, type, occurrence time, aggregate identity, and safe typed data. Clients de-duplicate hints by event ID and reload authoritative resources after a hint.
++
++Reconnect recovery is bounded and audience-scoped:
++
++```text
++GET /api/v1/integration/events?afterOccurredAt=<timestamp>&afterEventId=<guid>&pageSize=50
++```
++
++Both cursor fields are supplied together. The response returns the next scan cursor even when intervening messages are not visible to the caller, preventing cross-audience data disclosure and stalled recovery.
++
++## Process topology
++
++SignalR connections live in the API process, so the Outbox dispatcher is hosted by `GoldInvoice.Api`. SQL claiming still supports multiple API dispatcher instances. A future multi-node deployment must configure a supported SignalR scale-out backplane or managed SignalR service before expecting a notification emitted by one API node to reach connections attached to another node.
++
++`GoldInvoice.Worker` now uses independent hosted services and schedules for market-price polling and reservation expiration. A failure or provider delay in one workload does not stop or postpone the other workload. Market-price commits still feed the same Outbox consumed by the API dispatcher.
++
++## Configuration
++
++```json
++{
++  "Outbox": {
++    "BatchSize": 50,
++    "PollIntervalMilliseconds": 1000,
++    "LockDurationSeconds": 60,
++    "HeartbeatIntervalSeconds": 20,
++    "MaximumAttempts": 5,
++    "RetryBaseDelaySeconds": 5,
++    "MaximumRetryDelaySeconds": 300
++  },
++  "Worker": {
++    "ReservationSweepIntervalSeconds": 30
++  }
++}
++```
++
++The heartbeat interval must remain shorter than the lock duration. Settings are validated during host startup.
++
++## Verification coverage
++
++Phase 6 adds tests for lock ownership, expired-lock recovery, heartbeat-compatible state transitions, retry timing, permanent dead-letter transition, graceful release, duplicate dispatch suppression, audience-scoped recovery, audited reprocessing, Hub authorization, absence of arbitrary group joins, and sensitive-field exclusion. Existing Phase 4/5 workflow tests now also verify valid-only market-price events and idempotent transactional Outbox production.
++
++This environment does not contain the .NET SDK or SQL Server, so Release build, the complete test suite, the SQL Server concurrent-claim test, and `HasPendingModelChanges()` must be run on the user's .NET 8/SQL Server environment before Phase 6 is closed.
+diff --git a/docs/implementation-roadmap.md b/docs/implementation-roadmap.md
+index 8d2eb719094e4b70b5544040fc45b9ec3b0b3d08..f2852853b249a290028680681428e2a7158777b3 100644
+--- a/docs/implementation-roadmap.md
++++ b/docs/implementation-roadmap.md
+@@ -2,9 +2,19 @@
+ 
+ ## Current Phase
+ 
+-Phase 5: Customer addresses, orders, payments, and immutable invoices.
++Phase 6 implementation: Worker isolation, durable Outbox dispatch, and authorized SignalR delivery.
+ 
+-The repository entry point for this phase is commit `ca76a90`. Phases 1 through 4 are already shared on `main`; they are not rebuilt or squashed. The shared `InitialDomainModel` and `AddPhase4CatalogPricingInventory` migrations are immutable. Phase 5 database changes must be additive.
++The user confirmed on 2026-08-10 that the Phase 5 restore, build, complete test suite, and database verification all passed on the target .NET 8/SQL Server environment. Phase 5 is therefore closed and Phase 6 is authorized. This environment still has no .NET SDK or target SQL Server access, so Phase 6 validation must be repeated on that environment before Phase 6 closes.
++
++Phase 6 reuses the existing Outbox schema and introduces no database-model change. No completed phase is rebuilt, no shared migration is edited, and no future-phase table or behavior is introduced early.
++
++The committed migration chain is:
++
++1. `20260731190255_InitialDomainModel`
++2. `20260731213000_AddPhase4CatalogPricingInventory`
++3. `20260801130000_AddPhase5OrdersPaymentsInvoices`
++
++Because all three migrations are committed and pushed, they are immutable regardless of whether a particular database has applied them. Every future database change must use a new additive EF Core migration.
+ 
+ ## Completed Requirements
+ 
+@@ -14,114 +24,259 @@ The repository entry point for this phase is commit `ca76a90`. Phases 1 through
+ - Validated configuration, structured logging, correlation IDs, Problem Details, CORS, security headers, and health endpoints.
+ - Release build and foundation tests recorded in `docs/architecture/phase-1-foundation.md`.
+ 
+-### Phase 2: Domain model and SQL Server
++### Phase 2: Domain model and SQL Server foundation
+ 
+-- Initial 32 business entities plus ASP.NET Core Identity persistence.
+-- Explicit schemas, `NO ACTION` relationships, SQL constraints, indexes, soft deletion, audit fields, and `rowversion` concurrency.
++- Initial business model plus ASP.NET Core Identity persistence, with explicit schemas and names rather than generic `Data`, `Details`, or `Logs` tables.
++- Catalog `Product` and `ProductVariant`, aggregate `InventoryItem`, append-only `StockMovement`, `StockReservation`, sales, payment, invoice, device, outbox, audit, setting, and idempotency foundations.
++- SQL Server `NO ACTION` relationships, check constraints, indexes, explicit decimal precision, rial money columns, soft deletion, UTC audit fields, and `rowversion` concurrency.
+ - Shared migration `InitialDomainModel` in `GoldInvoice.Infrastructure/Persistence/Migrations`.
+ - Database decisions recorded in `docs/architecture/phase-2-data-model.md`.
++- The later gold-commerce additions were made through the additive Phase 4 migration; the shared Phase 2 migration was not rewritten.
+ 
+-### Phase 3: Identity and authorization
++### Phase 3: Identity and authorization implementation
+ 
+ - Owner, Admin, and Customer roles; stable permission catalog and permission policies.
++- Idempotent permission and Owner-role seeding, explicit Owner bootstrap with no default credential, and serialized bootstrap creation.
+ - Identity password policy, lockout, short-lived JWT access tokens, live session/security-stamp validation, hashed refresh tokens, token families, rotation, reuse detection, and session revocation.
+-- TOTP enrollment, recovery codes, privileged-user MFA enforcement, login tracking, and security-event classification.
+-- Pure administration policies prevent an Admin managing an Owner, privilege grants beyond the actor's access, and removal of the final active Owner when administration endpoints apply them.
+-- Explicit Owner bootstrap with no default credential.
+-- Phase details and verification are recorded in `docs/architecture/phase-3-identity-security.md`.
++- TOTP enrollment, protected authenticator keys and recovery-code payloads, recovery codes, privileged-user MFA enforcement, login-attempt tracking, and security-event classification.
++- Pure administration policies prevent an Admin managing an Owner, granting permissions the actor does not hold, and removing the final active Owner.
++- Unit and integration coverage for refresh-token rotation/reuse, session revocation, Owner MFA, permission seeding, bootstrap idempotency, and core Owner/Admin authorization policies.
++- Phase details are recorded in `docs/architecture/phase-3-identity-security.md`.
+ 
+ ### Phase 4: Catalog, pricing, and inventory
+ 
+-- Hierarchical product categories and authoritative gold-product details.
+-- Effective-dated fixed, weight, market, and manual-review pricing rules with deterministic rial calculations and immutable calculation snapshots.
+-- Validated market-price provider boundary, retry/timeout behavior, safe quote snapshots, and polling worker.
+-- Aggregate inventory plus individually tracked physical units, atomic reservations/transfers, overselling protection, and append-only stock movements.
+-- Serialized Owner bootstrap and protected MFA material completed as Phase 3 closure work.
+-- Phase details and verification are recorded in `docs/architecture/phase-4-catalog-pricing-inventory.md`.
++- Hierarchical `ProductCategory` with unique slug, restricted parent/product relationships, ordering, activation, and optimistic concurrency.
++- `GoldProductDetail` at the sellable `ProductVariant` boundary, with explicit decimal weights, karat validation, wage/profit/tax inputs, stone and variable-weight flags, and no `float`/`double` storage.
++- Effective-dated `ProductPricingRule` supporting fixed, weight-based, market-based, and manual-review methods without hard-coding a formula in controllers or persistence entities.
++- Deterministic backend pricing with separately auditable calculation components, immutable calculation snapshots, whole-rial `MidpointRounding.AwayFromZero`, and no authoritative client total.
++- `MarketPriceSource` and append-only `MarketPriceSnapshot`, provider boundaries, non-secret configuration references, payload hashes instead of raw sensitive responses, quote validation, duplicate protection, retry/timeout behavior, safe selection of the latest valid quote, and a fake provider for tests.
++- Aggregate `InventoryItem` and optional physical-piece `InventoryUnit` support, including unique optional serial/barcode identifiers, actual weights and karat, warehouse ownership, acquisition cost, lifecycle status, and concurrency protection.
++- Atomic reservations, releases, transfers, append-only stock movements, individually tracked piece sales, and overselling protection for both aggregate and piece-tracked stock.
++- Use cases cover identical counted stock, similar pieces with different weights, stone-bearing products, fixed and market/weight pricing, transfers, reservation/cancellation, barcode sale, and the physical-unit lifecycle needed by a future confirmed return workflow.
++- Worker polling for market prices and reservation expiration without a production provider being invented.
++- Additive migration `AddPhase4CatalogPricingInventory`; no Phase 2 migration rewrite.
++- Phase details are recorded in `docs/architecture/phase-4-catalog-pricing-inventory.md`.
++
++### Phase 5: Orders, payments, and invoices implementation
++
++- Customer-owned, soft-deletable `CustomerAddress` rows with one active default per customer, ownership enforcement, and rowversion-protected updates.
++- Independent order and invoice address snapshots so editing or deleting a saved address never rewrites history.
++- Typed `Store.Profile` JSON in the existing `configuration.SystemSettings` table, copied into order and invoice store snapshots; no unused one-row `StoreProfile` table.
++- Idempotent order creation with backend-generated totals and complete product, physical unit, weight, karat, wage, profit, tax, market quote, calculation, customer, address, and store snapshots.
++- Serializable reservation of aggregate inventory and physical units with matching ledger entries, plus atomic cancellation/release behavior.
++- Configurable `PaymentGateway` rows containing only non-secret configuration references and a pluggable `IPaymentGatewayProvider` boundary.
++- Idempotent online initiation, bounded provider timeout, validated HTTPS redirect handling, masked metadata, authenticated and rate-limited callbacks, duplicate callback boundaries, and explicit `RequiresReview` handling for ambiguous callbacks.
++- Manual payment paths use the same inventory confirmation, order transition, and invoice transaction; review-state payments cannot be silently replaced.
++- Atomic, concurrency-protected `InvoiceSequence`, unique invoice number/order/payment boundaries, immutable invoice item/address/store/customer snapshots, explicit voiding, and no number reuse.
++- Tests are present for duplicate callbacks, duplicate invoice prevention, idempotent order/payment behavior, sequence monotonicity, filtered indexes, no-cascade relationships, snapshot consistency, and pending EF model changes.
++- Additive migration `AddPhase5OrdersPaymentsInvoices`; earlier migrations remain unchanged.
++- Phase details are recorded in `docs/architecture/phase-5-orders-payments-invoices.md`.
++
++## Phase 5 Completion Record
++
++### Phase 5 verification gate
++
++Reported successful by the user on the target environment. The commands and database checks remain below as the reproducible closure procedure.
++
++- Run `dotnet tool restore` and confirm the pinned `dotnet-ef` 8.0.29 tool restores.
++- Run `dotnet restore VendomeJewleryInvoiceManagement.sln`.
++- Run a Release build with warnings and errors reported without modifying source-generated migration history.
++- Run the full Unit and Integration test suites; the repository currently contains 84 `[Fact]`/`[Theory]` tests.
++- Confirm `GoldInvoiceDbContext.Database.HasPendingModelChanges()` remains false.
++- Run `dotnet ef migrations list` and confirm exactly the three committed migrations listed under Current Phase.
++- Inspect the target database's `dbo.__EFMigrationsHistory` before applying any migration.
++- Apply only pending committed migrations to the intended non-production database; never drop a database, delete migration-history rows, or rewrite an applied/shared migration.
++- For any database containing real data, take and verify an appropriate backup before applying an additive migration.
++- Record Restore, Build, Test, migration-list, migration-application, and database-history results in the Phase 5 completion report.
++
++Verification commands:
++
++```bash
++dotnet tool restore
++dotnet restore VendomeJewleryInvoiceManagement.sln
++dotnet build VendomeJewleryInvoiceManagement.sln --configuration Release --no-restore
++dotnet test VendomeJewleryInvoiceManagement.sln --configuration Release --no-build
++dotnet ef migrations list \
++  --project GoldInvoice.Infrastructure \
++  --startup-project GoldInvoice.Infrastructure \
++  --context GoldInvoiceDbContext
++```
++
++Target-database history check:
++
++```sql
++SELECT MigrationId, ProductVersion
++FROM dbo.__EFMigrationsHistory
++ORDER BY MigrationId;
++```
++
++### Retrospective follow-up assigned to Phase 3
++
++The new requirement set exposed two Phase 3 behaviors that are not evidenced by the current API/application surface. Only these missing behaviors are added; the completed identity model is not rebuilt.
++
++- Add permission-protected user/role administration use cases that can grant and revoke `RolePermission` rows while applying the existing anti-escalation and final-Owner policies inside the transaction.
++- Complete the `TrustedDevice` lifecycle: enrollment/recognition rules, bounded trust expiration, revocation, session association, ownership checks, and tests. A database entity alone is not completion of this behavior.
++- Add explicit Owner/Admin/Customer endpoint-level authorization tests for these administration paths.
++- This follow-up remains assigned to the security module and is not silently represented as Phase 6 work. Any required schema change must be a new additive migration; existing security migrations remain immutable.
+ 
+ ## Current Phase Requirements
+ 
+-### Customer addresses and store identity
++### Phase 6: Worker, outbox, and SignalR
+ 
+-- Customer-owned soft-deletable addresses, one active default per customer, ownership checks, and rowversion-protected updates.
+-- Immutable order and invoice address snapshots so address edits never rewrite history.
+-- Typed `Store.Profile` JSON in existing system settings, copied into order and invoice snapshots.
+-- No unused `StoreProfile` or `DiscountPolicy` table.
++#### Existing foundation to reuse
+ 
+-### Orders and inventory coordination
++- Reuse the existing `integration.OutboxMessages` table and `OutboxMessage` entity; do not create a duplicate outbox table.
++- Reuse the existing Worker, which already polls market prices and expires reservations; separate schedules and failures so one workload cannot starve the others.
++- The pre-Phase-6 outbox status, retry, lock, and dead-letter columns were schema preparation only; the current Phase 6 work activates them without duplicating the table.
+ 
+-- Idempotent order creation with server-generated totals and complete weight, karat, price-component, market-rate, calculation-reference, customer, address, and store snapshots.
+-- Serializable reservation of aggregate stock and individually tracked units with stock-ledger entries in the same transaction.
+-- Order-linked reservation integrity checks and payment-only confirmation; generic inventory mutations cannot bypass the sales workflow.
+-- Ownership-scoped reads and mutations, bounded pagination, optimistic concurrency, and staff-only cross-customer/discount/shipping behavior.
+-- Unpaid cancellation that releases reservations, restores tracked units, cancels non-final payments, and records status history atomically.
++#### Durable event production
+ 
+-### Payments
++- Write an Outbox message in the same SQL transaction as `InvoiceCreated`, `InventoryChanged`, `OrderStatusChanged`, and `MarketPriceUpdated` state changes.
++- Use stable versioned message contracts, event IDs, occurrence timestamps, aggregate identifiers, correlation/causation metadata, and payloads containing no secrets or unnecessary personal data.
++- Do not publish directly from controllers or before the business transaction commits.
++- Add an `InboxMessage`/consumer-idempotency store only when an actual durable consumer requires it; define its consumer/message uniqueness boundary instead of creating an unused table.
+ 
+-- Configurable gateways storing only non-secret configuration references and a pluggable provider interface.
+-- Idempotent online initiation with bounded provider timeout, validated HTTPS redirects, masked metadata, and cancellation-safe persistence.
+-- Authenticated, request-bounded, rate-limited callbacks with provider/external-ID and provider/payload-hash duplicate boundaries.
+-- Gateway, authority, amount, state, and inventory validation before accepting a payment; ambiguous callbacks enter explicit review instead of marking an order paid.
+-- Review-state online payments cannot be silently cancelled or replaced by a manual payment.
+-- Permission-protected manual payments using the same inventory confirmation and invoice transaction.
++#### Reliable dispatch
+ 
+-### Invoices
++- Claim batches atomically with lock IDs and lock expiry so multiple Worker instances cannot process the same message concurrently.
++- Recover abandoned locks after expiry, renew locks/heartbeat for long processing, and release cleanly during graceful shutdown.
++- Implement bounded exponential backoff, sanitized failure recording, maximum attempts, and a terminal dead-letter state.
++- Make handlers idempotent and distinguish transient failures from permanent invalid messages.
++- Provide permission-protected inspection/reprocess operations for dead-letter messages; reprocessing must be auditable and must not reset history silently.
++- Add tests for concurrent claims, lock expiry/recovery, retry timing, dead-letter transition, duplicate delivery, handler idempotency, cancellation, and graceful shutdown.
+ 
+-- Exactly one invoice per order and verified payment, with an atomic concurrency-protected sequence and unique invoice number.
+-- Immutable item/address/store/customer snapshots copied from the paid order.
+-- Explicit invoice void transition with reason and rowversion; no deletion or snapshot rewrite.
+-- Duplicate callback, duplicate invoice, idempotent order/payment, sequence, filtered-index, no-cascade, and pending-model-change tests.
++#### SignalR
+ 
+-## Deferred Requirements
++- Add authorized SignalR connections and stable groups for `User`, `Role`, and approved `Device` identities.
++- Resolve current roles/permissions/device state on connection and prevent clients from joining arbitrary groups.
++- Publish only post-commit outbox events; SignalR is not a replacement for SQL Server or durable queueing.
++- Treat real-time messages as hints. After reconnect, clients recover authoritative missed state through bounded API queries/cursors rather than assuming delivery continuity.
++- Add connection authorization, group-isolation, reconnect-recovery, and sensitive-payload tests.
+ 
+-### Phase 6: Worker, outbox, and SignalR
++#### Market-price scheduling
+ 
+-- Durable outbox/inbox processing, exponential retry, dead-letter handling, processing locks, heartbeat, and graceful shutdown.
+-- Events for invoice creation, inventory changes, order status changes, and market-price updates.
+-- Authorized SignalR groups for users, roles, and devices; reconnect recovery remains API-backed.
++- Preserve periodic provider polling, validation, latest-valid selection, timeout, and retry rules from Phase 4.
++- Emit `MarketPriceUpdated` only after a valid snapshot is committed, and prevent one provider failure from stopping reservation expiration or outbox dispatch.
++
++Phase 6 implementation details are recorded in `docs/architecture/phase-6-worker-outbox-signalr.md`. The existing Outbox table is sufficient, so this phase currently has no EF Core migration and no Inbox table.
++
++## Deferred Requirements
+ 
+ ### Phase 7: Desktop and printing
+ 
+-- Device printers, print profiles, idempotent invoice print jobs, durable print logs, reprint approval, secure device enrollment, and printer-result reporting by the Desktop application.
++#### Existing foundation to reuse
++
++- Reuse `devices.DesktopDevices` and `invoicing.InvoicePrintLogs`; do not create duplicate device or generic log tables.
++- Treat the existing `DesktopDevice` and `InvoicePrintLog` rows as schema preparation, not as a completed Desktop/printing workflow.
++
++#### Device and printer model
++
++- Complete secure Desktop device enrollment using short-lived registration tokens, explicit approval, public-key/thumbprint binding, heartbeat/last-seen state, revocation, and least-privilege device authorization.
++- Add `DevicePrinter` with a required `DesktopDeviceId`, system printer name scoped to that device, display name, type, default/enabled state, last-seen time, audit fields, and rowversion.
++- Add `PrintProfile` with paper size, orientation, copy count, color setting, typed margin settings, default state, audit fields, and rowversion.
++- Enforce at most one active default printer per device and one active default profile for the intended scope.
++
++#### Durable print workflow
++
++- Add `InvoicePrintJob` linked to invoice, approved Desktop device, device printer, and print profile, with status, requester, timestamps, retry count, sanitized failure fields, idempotency key, and rowversion.
++- Keep print jobs durable and idempotent. The Backend records a request; only the Desktop application can report that the operating-system print completed or failed.
++- Keep `InvoicePrintLog` append-only. Reprints require a reason and the requesting/approving user, and must never erase earlier attempts.
++- Verify the printer belongs to the selected Desktop device and is currently enabled before dispatch.
++- Hide operating-system and printer-sensitive failure details from Customers.
++- Deny Customer access to device, printer, job-management, and result-reporting APIs.
++- Add tests for device approval/revocation, printer ownership, duplicate job keys, result-report authorization, retries, reprint approval, and immutable log history.
++
++### Phase 8: Hardening and production readiness
++
++- Review actual SQL Server query plans, missing-index suggestions, duplicate/overlapping indexes, and hot-query regressions before adding or removing indexes.
++- Enforce pagination and a maximum page size on every list endpoint; add query-performance tests for representative data volumes.
++- Define and implement retention policies for audit logs, security events, callbacks, idempotency data, outbox/inbox data, and operational history while preserving legal/fiscal records.
++- Document and test database backups, point-in-time/restore procedures, integrity checks, migration rollback/forward-fix policy, recovery objectives, and disaster recovery.
++- Use least-privilege SQL identities, encrypted database/network transport, protected persistent Data Protection keys, secret rotation, and cryptographic key rotation.
++- Add dependency and vulnerability scanning, security-header review, rate-limit review, WAF guidance, origin protection, and safe deployment configuration checks.
++- Complete liveness/readiness dependency checks, structured logs, metrics, tracing/correlation, dashboards, and actionable alerts.
++- Run load, soak, concurrency, overselling, duplicate-callback, invoice-sequence, outbox-claim, and graceful-shutdown tests in a production-like environment.
+ 
+-### Phase 8: Production hardening
++### Unscheduled business-dependent requirements
+ 
+-- Query-plan/index review, enforced pagination, retention policies, backup and restore tests, database integrity checks, least-privilege SQL access, transport encryption, secret/key rotation, dependency scanning, WAF/origin guidance, readiness/liveness review, structured alerting, load/concurrency tests, and disaster-recovery documentation.
++- `ReturnRequest`, `ReturnItem`, and `Refund` remain deferred until eligibility, physical-unit disposition, partial return, payment-gateway refund, accounting, and fiscal-document rules are confirmed. Do not create empty generic tables.
++- Actual Cloudinary/S3/object-storage upload remains deferred until a provider, authorization model, file-validation rules, lifecycle, and deletion/retention policy are selected. Existing image metadata continues to use `StorageKey`.
+ 
+ ## Architecture Decisions
+ 
+ - The solution remains a .NET 8 modular monolith with Domain and Application independent of EF Core and ASP.NET Core.
+-- Product variants are the sellable pricing and inventory boundary. A product owns catalog presentation; a variant owns gold detail, pricing rules, aggregate stock, and optional physical units.
+-- Application interfaces define use cases and provider boundaries. EF Core, transactions, retries, and external adapters remain in Infrastructure. Controllers contain transport mapping only.
+-- Market quotes and price calculations are immutable audit inputs. Phase 5 order and invoice items reference and copy the values required to reproduce a sale.
+-- Price calculations use explicit rule inputs and `MidpointRounding.AwayFromZero` to whole Iranian rials. Client-provided totals are never authoritative.
+-- Store identity remains a typed document in existing settings; orders and invoices own immutable copies. Payment providers are Infrastructure adapters behind Application contracts.
+-- Returns and refunds remain deferred until stock, gateway, partial-return, and fiscal-document rules are confirmed.
+-- Image metadata continues to use object-storage `StorageKey`; actual Cloudinary/S3 upload is deferred until a storage provider is selected.
++- Existing names, schemas, namespaces, entity boundaries, and conventions are preserved. Before any new table is proposed, the current model and migration snapshot must be searched for the same concept under another name.
++- Product boundaries remain explicit: `Product` is catalog identity, `ProductVariant` is the sellable boundary, `GoldProductDetail` holds gold-specific attributes, `InventoryItem` is aggregate warehouse stock, `InventoryUnit` is an optional physical piece, `StockMovement` is the append-only ledger, and `StockReservation` is temporary allocation.
++- Product variants own gold detail, pricing rules, aggregate stock, and optional physical units. Duplicate facts are copied only into immutable order/invoice snapshots where historical reconstruction requires them.
++- Application interfaces define use cases and provider boundaries. EF Core, transactions, retries, secret resolution, and external adapters remain in Infrastructure. Controllers contain transport mapping only.
++- Pricing calculations remain independent of controllers and persistence entities, deterministic, unit-tested, componentized, and auditable. Client-provided final prices are never authoritative.
++- Market quotes and price calculations are immutable audit inputs. Order and invoice items reference and copy the exact values required to reproduce a sale.
++- Store identity remains a typed document in existing settings; orders and invoices own immutable copies. Payment providers remain Infrastructure adapters behind Application contracts.
++- SignalR carries post-commit notifications only; SQL Server/outbox state and recovery APIs remain authoritative.
++- Phase 7 printer entities are introduced only during Phase 7. Phase 8 operational changes are driven by measured production-like evidence rather than speculative schema churn.
+ 
+ ## Database Decisions
+ 
+-- `InitialDomainModel` and `AddPhase4CatalogPricingInventory` are committed and pushed and will never be edited, deleted, or removed from migration history.
+-- Phase 5 uses the additive migration `AddPhase5OrdersPaymentsInvoices`; existing nullable order/invoice extensions preserve legacy rows.
++- `InitialDomainModel`, `AddPhase4CatalogPricingInventory`, and `AddPhase5OrdersPaymentsInvoices` are committed and pushed and will never be edited, deleted, squashed, or removed from migration history.
++- Whether `InitialDomainModel` was applied to a particular database is still checked through `dbo.__EFMigrationsHistory`, but commit/push status already makes the migration immutable.
++- No database with real data is dropped. No applied migration-history row is deleted. Potentially destructive commands require an explicit target, backup/restore consideration, and a report before execution.
++- Future changes are additive and backward-compatible where practical. A new EF Core migration must trace every schema change.
+ - New money columns use `bigint` Iranian rials. Weights and percentages use explicit decimal precision; `float` and `double` are prohibited.
+-- Foreign keys use `NO ACTION`/restrict semantics. Ledgers, market/calculation snapshots, order/invoice snapshots, and callbacks are append-only or protected from hard deletion.
+-- SQL constraints and unique indexes provide the final duplicate and state-safety boundary; Application validation provides useful errors before a constraint is reached.
++- Foreign keys use `NO ACTION`/restrict semantics unless an explicitly documented aggregate-owned exception is proven safe. Category parents and categories with products never cascade-delete.
++- SQL constraints and unique/filtered indexes provide final duplicate, state, and concurrency boundaries; Application validation provides useful errors before a constraint is reached.
++- Existing immutable ledgers, market/calculation snapshots, order/invoice snapshots, callbacks, and print logs are append-only or protected from hard deletion.
++- Outbox processing must reuse the existing table. An Inbox, printer, profile, or print-job table is added only in its assigned phase and only with a concrete workflow and uniqueness boundary.
+ 
+ ## Security Decisions
+ 
+-- Provider API keys, payment credentials, JWT keys, Data Protection keys, and connection strings never enter committed configuration or business tables.
+-- Market sources store only non-secret endpoints and configuration references. Raw provider payloads are represented only by a cryptographic hash.
+-- Payment gateways also store only external configuration references. Callback authenticity is decided by the registered provider adapter before any payment transition; raw callback bodies are not persisted or logged.
+-- Data Protection key rings must be persisted and access-controlled in production; ephemeral container keys are not acceptable for protected MFA data.
+-- Customer data is ownership-scoped. Cross-customer orders, manual payments, gateway configuration, store settings, status changes, and invoice voiding require existing management permissions.
++- Provider API keys, payment credentials, JWT keys, MFA secrets, Data Protection keys, registration tokens, connection strings, and other credentials never enter committed configuration or business tables in plain text.
++- Market and payment source rows store only non-secret configuration references. Raw provider/callback payloads are represented only by a cryptographic hash and sanitized metadata when persistence is required.
++- Authenticator keys and recovery-code payloads use ASP.NET Core Data Protection. Production key rings must be persistent, shared where necessary, access-controlled, backed up, and covered by rotation/recovery procedures.
++- Refresh tokens remain hashed, family-linked, single-use, rotated, reuse-detected, and revocable through live sessions/security stamps.
++- Customer data is ownership-scoped. Cross-customer operations, permission/role changes, manual payments, gateway configuration, store settings, status changes, invoice voiding, outbox reprocessing, and device/printer operations require explicit permissions.
++- Admins cannot manage Owners or grant access they do not possess. The final active Owner cannot be disabled, demoted, or deleted, and these rules must execute transactionally in administration use cases.
++- SignalR group membership is server-controlled. Device connections require active approved device identity; browser/user connections require current authenticated user state.
++- Logs, dead-letter errors, callback metadata, printer failures, and health responses are sanitized and do not expose secrets or unnecessary personal/system information.
+ 
+ ## Known Risks
+ 
+-- The target SQL Server instance is reachable only from the user's Windows machine, so this environment cannot inspect its `__EFMigrationsHistory` or apply migrations. This does not change the additive migration decision.
+-- No production market-price provider or secret-delivery mechanism has been selected. Phase 4 supplies the provider contract, safe ingestion pipeline, worker scheduling, and fake provider tests without inventing a vendor integration.
+-- No production payment gateway adapter or secret-delivery mechanism has been selected. Phase 5 supplies the provider contract and safe orchestration without inventing a vendor integration.
+-- Refunds and returns have materially different inventory, payment, and fiscal consequences; implementing them before the business rules are confirmed would create unsafe generic behavior.
++- This environment has no `dotnet`, MSBuild, C# compiler, container runtime, or cached .NET SDK package. Phase 6 Restore, Build, Test, `dotnet ef migrations list`, and `HasPendingModelChanges` cannot be executed here.
++- The target SQL Server is reachable only from the user's Windows machine. SQL Server claim concurrency and the unchanged migration/model state must be verified there before Phase 6 closes.
++- Phase 3 has persistence and pure policies for `RolePermission` and `TrustedDevice`, but no complete administration/trusted-device application/API workflow is visible. That retrospective work remains explicitly tracked outside Phase 6.
++- There is no repository CI workflow, so Git history contains no independent Build/Test result for commit `2607d4d`.
++- No production market-price provider, payment gateway adapter, or secret-delivery mechanism has been selected. The existing contracts and safe orchestration must not be mistaken for production integrations.
++- Phase 6 now implements the existing `OutboxMessage` lifecycle locally; `DesktopDevice` and `InvoicePrintLog` remain forward foundations for the Phase 7 workflow.
++- SignalR delivery is in-process. A multi-node API deployment requires a supported backplane or managed SignalR service; SQL Outbox claiming alone does not fan a notification out to connections on every API node.
++- Refunds and returns have materially different inventory, payment, accounting, and fiscal consequences; implementing them before business rules are confirmed would create unsafe generic behavior.
+ 
+ ## Next Step
+ 
+-Verify Phase 5 with restore, Release build, the full test suite, `HasPendingModelChanges`, and migration application on the target SQL Server. After inspection and commit/push, begin Phase 6 durable outbox/inbox processing and authorized real-time notifications without folding refund, printing, or desktop scope into that phase.
++1. Run restore, Release build, and the complete 96-test suite on the target .NET 8 environment.
++2. Confirm `GoldInvoiceDbContext.Database.HasPendingModelChanges()` remains false and the migration list still contains exactly the three committed migrations through Phase 5.
++3. Exercise two concurrent dispatcher instances against SQL Server to verify atomic claims, expired-lock recovery, retry timing, and dead-letter transitions.
++4. Verify an authenticated SignalR client receives only its user/role/device audiences and recovers missed hints through the cursor API.
++5. Record the Phase 6 completion report, then commit and push only after all gates succeed. Do not include refund, return, Desktop, printing, or Phase 8 hardening scope in Phase 6.
++
++## Phase Completion Report Template
++
++Every phase closes with a report containing:
++
++- Phase completed
++- Requirements completed
++- Requirements deferred and their assigned phase
++- Entities added
++- Tables added
++- Constraints added
++- Indexes added
++- EF Core migrations created
++- Endpoints created
++- Tests created
++- Restore result
++- Build result
++- Test result
++- Migration-list and `__EFMigrationsHistory` result
++- Migration application result
++- Remaining risks
++- Commit SHA
++- Push result
++- Next phase

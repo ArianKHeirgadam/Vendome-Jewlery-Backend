@@ -105,6 +105,19 @@ public sealed class ProductResponse
     public string? Description { get; init; }
     public required bool IsActive { get; init; }
     public required IReadOnlyList<ProductVariantResponse> Variants { get; init; }
+    public required IReadOnlyList<ProductImageResponse> Images { get; init; }
+    public required string RowVersion { get; init; }
+}
+
+public sealed class ProductImageResponse
+{
+    public required Guid Id { get; init; }
+    public required Guid ProductId { get; init; }
+    public Guid? ProductVariantId { get; init; }
+    public required string ContentType { get; init; }
+    public string? AltText { get; init; }
+    public required int SortOrder { get; init; }
+    public required bool IsPrimary { get; init; }
     public required string RowVersion { get; init; }
 }
 

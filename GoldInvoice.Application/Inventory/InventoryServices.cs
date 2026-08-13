@@ -25,7 +25,42 @@ public sealed record InventoryItemInfo(
     int QuantityOnHand,
     int QuantityReserved,
     int QuantityAvailable,
+    long AverageUnitCostRials,
+    bool HasAcquisitionCost,
     string RowVersion);
+
+public sealed record SupplierPurchaseInfo(
+    Guid Id,
+    string PurchaseNumber,
+    Guid SupplierId,
+    string SupplierName,
+    Guid WarehouseId,
+    string WarehouseName,
+    Guid ProductVariantId,
+    string ProductName,
+    string VariantName,
+    string Sku,
+    Guid InventoryItemId,
+    int Quantity,
+    long UnitCostRials,
+    long TotalCostRials,
+    long SellingUnitPriceRials,
+    long ExpectedUnitProfitRials,
+    long ExpectedTotalProfitRials,
+    DateTimeOffset PurchasedAt,
+    string? SupplierReference,
+    string? Notes);
+
+public sealed record RecordSupplierPurchaseCommand(
+    Guid SupplierId,
+    Guid WarehouseId,
+    Guid ProductVariantId,
+    int Quantity,
+    long UnitCostRials,
+    long SellingUnitPriceRials,
+    DateTimeOffset? PurchasedAt,
+    string? SupplierReference,
+    string? Notes);
 
 public sealed record InventoryUnitInfo(
     Guid Id,
@@ -138,6 +173,12 @@ public interface IInventoryService
         Guid inventoryItemId,
         CancellationToken cancellationToken);
 
+    Task<PagedResult<InventoryItemInfo>> GetInventoryItemsAsync(
+        Guid? warehouseId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken);
+
     Task<InventoryUnitInfo> GetInventoryUnitAsync(
         Guid inventoryUnitId,
         CancellationToken cancellationToken);
@@ -187,4 +228,17 @@ public interface IInventoryService
         CancellationToken cancellationToken);
 
     Task<int> ExpireReservationsAsync(CancellationToken cancellationToken);
+}
+
+public interface ISupplierPurchaseService
+{
+    Task<PagedResult<SupplierPurchaseInfo>> GetPurchasesAsync(
+        int page,
+        int pageSize,
+        Guid? supplierId,
+        CancellationToken cancellationToken);
+
+    Task<SupplierPurchaseInfo> RecordPurchaseAsync(
+        RecordSupplierPurchaseCommand command,
+        CancellationToken cancellationToken);
 }

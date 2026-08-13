@@ -1,0 +1,14 @@
+--- a/GoldInvoice.IntegrationTests/PhaseSixWorkflowTests.cs
++++ b/GoldInvoice.IntegrationTests/PhaseSixWorkflowTests.cs
+@@ -174,9 +174,10 @@ public sealed class PhaseSixWorkflowTests
+ 
+     private static ServiceProvider CreateProvider(IIntegrationEventHandler handler)
+     {
++        var databaseName = $"phase-six-{Guid.NewGuid():N}";
+         var services = new ServiceCollection();
+         services.AddDbContext<GoldInvoiceDbContext>(options =>
+-            options.UseInMemoryDatabase($"phase-six-{Guid.NewGuid():N}"));
++            options.UseInMemoryDatabase(databaseName));
+         services.AddSingleton<TimeProvider>(new FixedTimeProvider(FixedNow));
+         services.AddSingleton<IOptions<OutboxOptions>>(Options.Create(new OutboxOptions
+         {

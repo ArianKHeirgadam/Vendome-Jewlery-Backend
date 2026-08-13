@@ -24,6 +24,9 @@ public sealed record InvoiceItemInfo(
     long? TaxRials,
     long UnitPriceRials,
     long LineTotalRials,
+    long? AcquisitionUnitCostRials,
+    long? AcquisitionTotalCostRials,
+    long? GrossProfitRials,
     string? RoundingPolicy);
 
 public sealed record InvoiceAddressSnapshotInfo(
@@ -62,6 +65,46 @@ public sealed record VoidInvoiceCommand(
     string Reason,
     string RowVersion);
 
+public sealed record CorrectInvoiceDocumentCommand(
+    Guid ActorUserId,
+    string CustomerName,
+    string? CustomerNationalId,
+    string RecipientName,
+    string PhoneNumber,
+    string Province,
+    string City,
+    string PostalCode,
+    string AddressLine,
+    string Reason,
+    string RowVersion);
+
+public sealed record RequestInvoicePrintCommand(
+    Guid ActorUserId,
+    int Copies,
+    bool CanReprint,
+    string? ReprintReason);
+
+public sealed record CompleteInvoicePrintCommand(
+    Guid ActorUserId,
+    bool Succeeded,
+    string? PrinterName,
+    string? FailureCode,
+    string RowVersion);
+
+public sealed record InvoicePrintInfo(
+    Guid Id,
+    Guid InvoiceId,
+    Guid RequestedByUserId,
+    InvoicePrintStatus Status,
+    int Copies,
+    bool IsReprint,
+    string? ReprintReason,
+    string? PrinterName,
+    DateTimeOffset? CompletedAt,
+    string? FailureCode,
+    DateTimeOffset CreatedAt,
+    string RowVersion);
+
 public interface IInvoiceService
 {
     Task<PagedResult<InvoiceInfo>> GetInvoicesAsync(
@@ -81,6 +124,22 @@ public interface IInvoiceService
     Task<InvoiceInfo> VoidInvoiceAsync(
         Guid invoiceId,
         VoidInvoiceCommand command,
+        CancellationToken cancellationToken);
+
+    Task<InvoiceInfo> CorrectDocumentAsync(
+        Guid invoiceId,
+        CorrectInvoiceDocumentCommand command,
+        CancellationToken cancellationToken);
+
+    Task<InvoicePrintInfo> RequestPrintAsync(
+        Guid invoiceId,
+        RequestInvoicePrintCommand command,
+        CancellationToken cancellationToken);
+
+    Task<InvoicePrintInfo> CompletePrintAsync(
+        Guid invoiceId,
+        Guid printJobId,
+        CompleteInvoicePrintCommand command,
         CancellationToken cancellationToken);
 }
 

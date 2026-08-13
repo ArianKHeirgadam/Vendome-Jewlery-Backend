@@ -132,6 +132,20 @@ public sealed class Invoice : AuditableEntity, IProtectedFromHardDelete
 
     public string? VoidReason { get; private set; }
 
+    public void CorrectCustomerSnapshot(string customerName, string? customerNationalId)
+    {
+        if (Status != InvoiceStatus.Issued)
+        {
+            throw new DomainConflictException("Only an issued invoice can be corrected.");
+        }
+
+        CustomerNameSnapshot = Guard.Required(customerName, nameof(customerName), 200);
+        CustomerNationalIdSnapshot = Guard.Optional(
+            customerNationalId,
+            nameof(customerNationalId),
+            32);
+    }
+
     public void Void(DateTimeOffset voidedAt, string reason)
     {
         Guard.AgainstDefault(voidedAt, nameof(voidedAt));
@@ -172,7 +186,8 @@ public sealed class InvoiceItem : AuditableEntity, IAppendOnlyEntity, IProtected
         long? wageRials = null,
         long? profitRials = null,
         long? taxRials = null,
-        string? roundingPolicy = null)
+        string? roundingPolicy = null,
+        long? acquisitionUnitCostRials = null)
     {
         Guard.AgainstEmpty(invoiceId, nameof(invoiceId));
         Guard.AgainstNonPositive(lineNumber, nameof(lineNumber));
@@ -180,6 +195,10 @@ public sealed class InvoiceItem : AuditableEntity, IAppendOnlyEntity, IProtected
         Guard.AgainstOutOfRange(purity, 1, 1000, nameof(purity));
         Guard.AgainstNegative(unitPriceRials, nameof(unitPriceRials));
         Guard.AgainstNonPositive(quantity, nameof(quantity));
+        if (acquisitionUnitCostRials is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(acquisitionUnitCostRials));
+        }
         if (orderItemId == Guid.Empty ||
             priceCalculationSnapshotId == Guid.Empty ||
             inventoryUnitId == Guid.Empty)
@@ -244,6 +263,13 @@ public sealed class InvoiceItem : AuditableEntity, IAppendOnlyEntity, IProtected
         UnitPriceRials = unitPriceRials;
         Quantity = quantity;
         LineTotalRials = checked(unitPriceRials * quantity);
+        AcquisitionUnitCostRials = acquisitionUnitCostRials;
+        AcquisitionTotalCostRials = acquisitionUnitCostRials is null
+            ? null
+            : checked(acquisitionUnitCostRials.Value * quantity);
+        GrossProfitRials = AcquisitionTotalCostRials is null
+            ? null
+            : checked(LineTotalRials - AcquisitionTotalCostRials.Value);
         RoundingPolicy = Guard.Optional(roundingPolicy, nameof(roundingPolicy), 100);
     }
 
@@ -287,10 +313,16 @@ public sealed class InvoiceItem : AuditableEntity, IAppendOnlyEntity, IProtected
 
     public long LineTotalRials { get; private set; }
 
+    public long? AcquisitionUnitCostRials { get; private set; }
+
+    public long? AcquisitionTotalCostRials { get; private set; }
+
+    public long? GrossProfitRials { get; private set; }
+
     public string? RoundingPolicy { get; private set; }
 }
 
-public sealed class InvoiceAddressSnapshot : AuditableEntity, IAppendOnlyEntity, IProtectedFromHardDelete
+public sealed class InvoiceAddressSnapshot : AuditableEntity, IProtectedFromHardDelete
 {
     private InvoiceAddressSnapshot()
     {
@@ -333,6 +365,22 @@ public sealed class InvoiceAddressSnapshot : AuditableEntity, IAppendOnlyEntity,
     public string PostalCode { get; private set; } = string.Empty;
 
     public string AddressLine { get; private set; } = string.Empty;
+
+    public void Correct(
+        string recipientName,
+        string phoneNumber,
+        string province,
+        string city,
+        string postalCode,
+        string addressLine)
+    {
+        RecipientName = Guard.Required(recipientName, nameof(recipientName), 200);
+        PhoneNumber = Guard.Required(phoneNumber, nameof(phoneNumber), 32);
+        Province = Guard.Required(province, nameof(province), 100);
+        City = Guard.Required(city, nameof(city), 100);
+        PostalCode = Guard.Required(postalCode, nameof(postalCode), 20);
+        AddressLine = Guard.Required(addressLine, nameof(addressLine), 1000);
+    }
 }
 
 public sealed class InvoiceStoreSnapshot : AuditableEntity, IAppendOnlyEntity, IProtectedFromHardDelete
@@ -394,15 +442,31 @@ public sealed class InvoicePrintLog : AuditableEntity, IProtectedFromHardDelete
     {
     }
 
-    public InvoicePrintLog(Guid invoiceId, Guid requestedByUserId, int copies, bool isReprint)
+    public InvoicePrintLog(
+        Guid invoiceId,
+        Guid requestedByUserId,
+        int copies,
+        bool isReprint,
+        string? reprintReason = null)
     {
         Guard.AgainstEmpty(invoiceId, nameof(invoiceId));
         Guard.AgainstEmpty(requestedByUserId, nameof(requestedByUserId));
         Guard.AgainstNonPositive(copies, nameof(copies));
+        if (copies > 20)
+        {
+            throw new ArgumentOutOfRangeException(nameof(copies));
+        }
+
+        if (isReprint && string.IsNullOrWhiteSpace(reprintReason))
+        {
+            throw new ArgumentException("A reprint reason is required.", nameof(reprintReason));
+        }
+
         InvoiceId = invoiceId;
         RequestedByUserId = requestedByUserId;
         Copies = copies;
         IsReprint = isReprint;
+        ReprintReason = Guard.Optional(reprintReason, nameof(reprintReason), 1000);
     }
 
     public Guid InvoiceId { get; private set; }
@@ -424,4 +488,31 @@ public sealed class InvoicePrintLog : AuditableEntity, IProtectedFromHardDelete
     public DateTimeOffset? CompletedAt { get; private set; }
 
     public string? FailureCode { get; private set; }
+
+    public void MarkSucceeded(DateTimeOffset completedAt, string? printerName)
+    {
+        Guard.AgainstDefault(completedAt, nameof(completedAt));
+        if (Status != InvoicePrintStatus.Requested)
+        {
+            throw new DomainConflictException("Only a requested print can succeed.");
+        }
+
+        Status = InvoicePrintStatus.Succeeded;
+        CompletedAt = completedAt;
+        PrinterName = Guard.Optional(printerName, nameof(printerName), 300);
+        FailureCode = null;
+    }
+
+    public void MarkFailed(DateTimeOffset completedAt, string failureCode)
+    {
+        Guard.AgainstDefault(completedAt, nameof(completedAt));
+        if (Status != InvoicePrintStatus.Requested)
+        {
+            throw new DomainConflictException("Only a requested print can fail.");
+        }
+
+        Status = InvoicePrintStatus.Failed;
+        CompletedAt = completedAt;
+        FailureCode = Guard.Required(failureCode, nameof(failureCode), 100);
+    }
 }

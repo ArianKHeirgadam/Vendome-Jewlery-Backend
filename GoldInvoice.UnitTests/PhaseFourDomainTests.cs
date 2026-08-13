@@ -3,6 +3,8 @@ using GoldInvoice.Application.Pricing;
 using GoldInvoice.Domain.Catalog;
 using GoldInvoice.Domain.Common;
 using GoldInvoice.Domain.Inventory;
+using GoldInvoice.Domain.Invoicing;
+using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Pricing;
 
 namespace GoldInvoice.UnitTests;
@@ -121,6 +123,47 @@ public sealed class PhaseFourDomainTests
         Assert.Throws<DomainConflictException>(() => item.Reserve(2));
         Assert.Throws<DomainConflictException>(() => item.Adjust(-2));
         Assert.Equal(1, item.QuantityAvailable);
+    }
+
+    [Fact]
+    public void SupplierPurchases_UseWeightedAverageAndMarkCostAsKnown()
+    {
+        var item = new InventoryItem(Guid.NewGuid(), Guid.NewGuid());
+
+        item.ReceivePurchase(2, 10_000_000);
+        item.Adjust(-1);
+        item.ReceivePurchase(1, 20_000_000);
+
+        Assert.True(item.HasAcquisitionCost);
+        Assert.Equal(15_000_000L, item.AverageUnitCostRials);
+        Assert.Equal(2, item.QuantityOnHand);
+    }
+
+    [Fact]
+    public void FirstDocumentedPurchase_DoesNotTreatLegacyStockAsFree()
+    {
+        var item = new InventoryItem(Guid.NewGuid(), Guid.NewGuid(), quantityOnHand: 3);
+
+        item.ReceivePurchase(1, 12_000_000);
+
+        Assert.True(item.HasAcquisitionCost);
+        Assert.Equal(12_000_000L, item.AverageUnitCostRials);
+    }
+
+    [Fact]
+    public void OrderAndInvoice_PreserveActualAcquisitionProfitSnapshot()
+    {
+        var orderItem = new OrderItem(
+            Guid.NewGuid(), Guid.NewGuid(), 1, "SKU-1", "انگشتر", "مدل یک",
+            2m, 750, 18_000_000, 2, acquisitionUnitCostRials: 11_000_000);
+        var invoiceItem = new InvoiceItem(
+            Guid.NewGuid(), 1, "SKU-1", "انگشتر", "مدل یک",
+            2m, 750, 18_000_000, 2, acquisitionUnitCostRials: 11_000_000);
+
+        Assert.Equal(22_000_000L, orderItem.AcquisitionTotalCostRials);
+        Assert.Equal(14_000_000L, orderItem.GrossProfitRials);
+        Assert.Equal(orderItem.AcquisitionUnitCostRials, invoiceItem.AcquisitionUnitCostRials);
+        Assert.Equal(orderItem.GrossProfitRials, invoiceItem.GrossProfitRials);
     }
 
     [Fact]

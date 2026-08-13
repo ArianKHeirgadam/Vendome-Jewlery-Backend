@@ -2,7 +2,7 @@
 
 ## Scope
 
-Phase 5 turns the Phase 4 catalog, pricing, and inventory model into an authoritative sales workflow. It adds customer addresses, immutable order and invoice snapshots, payment orchestration, callback idempotency, atomic invoice numbering, unpaid-order cancellation, and invoice voiding. The shared migrations from Phases 2 and 4 remain unchanged; all database changes are in the additive migration `AddPhase5OrdersPaymentsInvoices`.
+Phase 5 turns the Phase 4 catalog, pricing, and inventory model into an authoritative sales workflow. It adds customer addresses, protected order and invoice snapshots, payment orchestration, callback idempotency, atomic invoice numbering, unpaid-order cancellation, and invoice voiding. Financial, item, and store snapshots remain immutable; Phase 7C-A later adds only audited correction of buyer/delivery print fields. The shared migrations from Phases 2 and 4 remain unchanged; all database changes are in the additive migration `AddPhase5OrdersPaymentsInvoices`.
 
 Returns and refunds are intentionally deferred until the business defines eligibility, stock disposition, partial-return behavior, gateway refund behavior, and fiscal-document requirements. No generic `DiscountPolicy` table is created without a confirmed rule model.
 
@@ -14,7 +14,8 @@ The migration adds six tables:
 - `sales.OrderStoreSnapshots`: one immutable copy of the seller identity per order.
 - `billing.PaymentGateways`: gateway/provider metadata and a reference to external secret-backed configuration; credentials are never stored in this table.
 - `invoicing.InvoiceSequences`: one concurrency-protected counter per configured series.
-- `invoicing.InvoiceAddressSnapshots`: an immutable copy of the order address attached to an invoice.
+- `invoicing.InvoiceAddressSnapshots`: the protected delivery snapshot attached to
+  an invoice; Phase 7C-A permits only audited printed-address corrections.
 - `invoicing.InvoiceStoreSnapshots`: an immutable copy of the order seller identity attached to an invoice.
 
 Existing order and invoice items gain nullable Phase 5 snapshot columns so legacy rows remain readable. New rows copy the exact gross/net weight, karat, market unit rate, gold value, wage, profit, tax, final price, rounding policy, physical-unit reference, and price-calculation reference. SQL constraints reject partial snapshots and require the snapshotted components to equal the unit price.
@@ -64,7 +65,13 @@ Only a verified payment for the exact order total can issue an invoice. Unique o
 
 The default format is `INV-0000000001`; `Invoicing:SequenceSeries` and `Invoicing:SequencePrefix` are startup-validated safe identifiers. A series keeps its original prefix after its first issuance, and a prefix can belong to only one series, preventing a configuration change from restarting an existing visible number range. The sequence row uses `rowversion`, and the invoice number, order, and payment each have a unique index.
 
-Issued invoices are immutable apart from the explicit `Issued` to `Voided` transition. Voiding requires management permission, a reason, and a current invoice rowversion. It does not delete the invoice or rewrite any snapshot.
+Invoice number, financial totals, item lines, store identity, order/payment links,
+and issue state remain immutable apart from the explicit `Issued` to `Voided`
+transition. Phase 7C-A adds a narrowly scoped correction path for buyer and
+delivery fields used on the printed document; it requires management permission,
+a reason, a current invoice rowversion, and an append-only old/new audit entry.
+Voiding still requires management permission, a reason, and a current invoice
+rowversion. It does not delete the invoice or rewrite financial snapshots.
 
 ## HTTP endpoints
 

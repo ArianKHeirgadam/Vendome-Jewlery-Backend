@@ -52,6 +52,9 @@ internal sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderIte
                 "CK_OrderItems_Amounts",
                 "[UnitPriceRials] >= 0 AND [Quantity] > 0 AND [LineTotalRials] = [UnitPriceRials] * [Quantity]");
             table.HasCheckConstraint(
+                "CK_OrderItems_AcquisitionCost",
+                "([AcquisitionUnitCostRials] IS NULL AND [AcquisitionTotalCostRials] IS NULL AND [GrossProfitRials] IS NULL) OR ([AcquisitionUnitCostRials] >= 0 AND [AcquisitionTotalCostRials] = [AcquisitionUnitCostRials] * [Quantity] AND [GrossProfitRials] = [LineTotalRials] - [AcquisitionTotalCostRials])");
+            table.HasCheckConstraint(
                 "CK_OrderItems_PriceSnapshot",
                 "([PriceCalculationSnapshotId] IS NULL AND [InventoryItemId] IS NULL AND [InventoryUnitId] IS NULL AND [NetGoldWeightGrams] IS NULL AND [Karat] IS NULL AND [MarketUnitPriceRials] IS NULL AND [GoldValueRials] IS NULL AND [WageRials] IS NULL AND [ProfitRials] IS NULL AND [TaxRials] IS NULL AND [RoundingPolicy] IS NULL) OR ([PriceCalculationSnapshotId] IS NOT NULL AND [InventoryItemId] IS NOT NULL AND [NetGoldWeightGrams] > 0 AND [NetGoldWeightGrams] <= [WeightGrams] AND [Karat] IN (9, 10, 14, 18, 21, 22, 24) AND [MarketUnitPriceRials] >= 0 AND [GoldValueRials] >= 0 AND [WageRials] >= 0 AND [ProfitRials] >= 0 AND [TaxRials] >= 0 AND [UnitPriceRials] = [GoldValueRials] + [WageRials] + [ProfitRials] + [TaxRials] AND [RoundingPolicy] IS NOT NULL)");
         });
@@ -66,6 +69,9 @@ internal sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderIte
         builder.Property(item => item.WageRials).HasColumnType("bigint");
         builder.Property(item => item.ProfitRials).HasColumnType("bigint");
         builder.Property(item => item.TaxRials).HasColumnType("bigint");
+        builder.Property(item => item.AcquisitionUnitCostRials).HasColumnType("bigint");
+        builder.Property(item => item.AcquisitionTotalCostRials).HasColumnType("bigint");
+        builder.Property(item => item.GrossProfitRials).HasColumnType("bigint");
         builder.Property(item => item.RoundingPolicy).HasMaxLength(100).IsUnicode(false);
         builder.HasIndex(item => new { item.OrderId, item.LineNumber }).IsUnique();
         builder.HasIndex(item => item.PriceCalculationSnapshotId)

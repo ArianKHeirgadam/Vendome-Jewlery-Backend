@@ -3,6 +3,7 @@ using GoldInvoice.Application.Common;
 using GoldInvoice.Application.Inventory;
 using GoldInvoice.Application.Pricing;
 using GoldInvoice.Domain.Catalog;
+using GoldInvoice.Domain.Business;
 using GoldInvoice.Domain.Inventory;
 using GoldInvoice.Domain.Orders;
 using GoldInvoice.Domain.Pricing;
@@ -332,7 +333,45 @@ public sealed class PhaseFourWorkflowTests
                 transferred.InventoryItemId,
                 1,
                 100,
-                CancellationToken.None)).TotalCount);
+            CancellationToken.None)).TotalCount);
+    }
+
+    [Fact]
+    public async Task SupplierPurchase_UpdatesStockCostAndManualSellingPriceAtomically()
+    {
+        await using var context = CreateContext();
+        var timeProvider = new FixedTimeProvider(FixedNow);
+        var catalog = new CatalogService(context);
+        var product = await CreateSellableProductAsync(catalog);
+        var variant = Assert.Single(product.Variants);
+        var warehouse = new Warehouse("PURCHASE", "Purchase warehouse");
+        var supplier = new Supplier(
+            "SUP-001", "Test supplier", null, null, null, null, null, null);
+        context.AddRange(warehouse, supplier);
+        await context.SaveChangesAsync();
+        var service = new SupplierPurchaseService(context, TestOutboxWriter.Instance, timeProvider);
+
+        await service.RecordPurchaseAsync(
+            new RecordSupplierPurchaseCommand(
+                supplier.Id, warehouse.Id, variant.Id, 2, 10_000_000, 15_000_000,
+                FixedNow, "REF-1", null),
+            CancellationToken.None);
+        var second = await service.RecordPurchaseAsync(
+            new RecordSupplierPurchaseCommand(
+                supplier.Id, warehouse.Id, variant.Id, 2, 20_000_000, 30_000_000,
+                FixedNow, "REF-2", null),
+            CancellationToken.None);
+
+        var inventory = await context.InventoryItems.SingleAsync();
+        Assert.Equal(4, inventory.QuantityOnHand);
+        Assert.True(inventory.HasAcquisitionCost);
+        Assert.Equal(15_000_000L, inventory.AverageUnitCostRials);
+        Assert.Equal(20_000_000L, second.ExpectedTotalProfitRials);
+        Assert.Equal(2, await context.Set<SupplierPurchase>().CountAsync());
+        Assert.Equal(2, await context.StockMovements.CountAsync());
+        var activeRule = await context.ProductPricingRules.SingleAsync(rule => rule.IsActive);
+        Assert.Equal(PricingMethod.FixedPrice, activeRule.PricingMethod);
+        Assert.Equal(30_000_000L, activeRule.FixedPriceRials);
     }
 
     private static async Task<ProductInfo> CreateSellableProductAsync(CatalogService catalog)

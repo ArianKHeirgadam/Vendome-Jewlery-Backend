@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+ClientApp/node_modules/
+ClientApp/*.local
+ClientApp/*.log
+ClientApp/*.tsbuildinfo
