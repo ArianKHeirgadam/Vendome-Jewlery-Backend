@@ -63,6 +63,23 @@ export interface Product {
   rowVersion: string;
 }
 
+export interface ProductPricingRule {
+  id: string;
+  productVariantId: string;
+  pricingMethod: string;
+  goldMarketPriceType?: string | null;
+  fixedPriceRials?: number | null;
+  fixedGoldPricePerGramRials?: number | null;
+  wageType: string;
+  wageValue: number;
+  profitPercentage: number;
+  taxPercentage: number;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  isActive: boolean;
+  rowVersion: string;
+}
+
 export interface Warehouse {
   id: string;
   code: string;

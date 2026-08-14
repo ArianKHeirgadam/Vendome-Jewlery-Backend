@@ -17,6 +17,7 @@ import {
 } from "../features/integration/useIntegrationRealtime";
 import { OperationsProvider, useOperations } from "../features/operations/OperationsContext";
 import { OperationsRouter } from "../features/operations/OperationsPages";
+import { useLocale, type AppLanguage } from "../i18n/LocaleContext";
 
 type Theme = "light" | "dark";
 
@@ -65,18 +66,19 @@ function eventNotice(event: IntegrationEvent): string {
 
 export function App() {
   const auth = useAuthentication();
+  const { language } = useLocale();
 
   if (auth.status === "booting") return <AuthenticationSplash />;
   if (auth.recoveryCodes) return <RecoveryCodesPage />;
   if (auth.status === "anonymous") return <LoginPage />;
   return (
     <OperationsProvider>
-      <AuthenticatedApplication />
+      <AuthenticatedApplication language={language} />
     </OperationsProvider>
   );
 }
 
-function AuthenticatedApplication() {
+function AuthenticatedApplication({ language }: { language: AppLanguage }) {
   const auth = useAuthentication();
   const operations = useOperations();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
@@ -137,7 +139,7 @@ function AuthenticatedApplication() {
   const isDashboard = currentPath === "/" || currentPath === "/dashboard";
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-language={language}>
       <AppHeader
         profile={profile}
         theme={theme}
@@ -158,11 +160,9 @@ function AuthenticatedApplication() {
         onNavigate={navigate}
         onClose={() => setSidebarOpen(false)}
       />
+      <MarketRail market={dashboard.market} />
       {isDashboard ? (
-        <>
-          <MarketRail market={dashboard.market} />
-          <DashboardPage snapshot={dashboard} onNavigate={navigate} />
-        </>
+        <DashboardPage snapshot={dashboard} onNavigate={navigate} />
       ) : (
         <OperationsRouter
           path={currentPath}

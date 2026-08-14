@@ -3,12 +3,14 @@ import type {
   CategoryShare,
   RevenuePoint,
 } from "./dashboard.types";
+import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
 
 interface RevenueChartProps {
   values: RevenuePoint[];
 }
 
-function toPersianDigits(value: number) {
+function toLocalizedDigits(value: number) {
+  if (activeNumberLocale() === "en-US") return value.toString().replace("-", "−");
   return value.toString()
     .replace("-", "−")
     .replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
@@ -75,7 +77,7 @@ export function RevenueChart({ values }: RevenueChartProps) {
             <g key={y}>
               <line className="chart-grid-line" x1="0" x2={width} y1={y} y2={y} />
               <text className="chart-y-label" x="-9" y={y + 4} textAnchor="end">
-                {toPersianDigits(Math.round(max - ((max - min) * index) / 4))}
+                {toLocalizedDigits(Math.round(max - ((max - min) * index) / 4))}
               </text>
             </g>
           ))}
@@ -120,17 +122,17 @@ export function RevenueChart({ values }: RevenueChartProps) {
       {activePoint && (
         <div className="chart-tooltip" style={{ left: `${tooltipLeft}%` }} role="status">
           <strong>{activePoint.month}</strong>
-          <span><i className="chart-legend-dot chart-legend-dot--profit" /> سود <b>{toPersianDigits(Number(activePoint.profit.toFixed(1)))}</b></span>
-          <span><i className="chart-legend-dot chart-legend-dot--sales" /> فروش <b>{toPersianDigits(Number(activePoint.revenue.toFixed(1)))}</b></span>
-          <small>میلیون ریال</small>
+          <span><i className="chart-legend-dot chart-legend-dot--profit" /> سود <b>{toLocalizedDigits(Number(activePoint.profit.toFixed(1)))}</b></span>
+          <span><i className="chart-legend-dot chart-legend-dot--sales" /> فروش <b>{toLocalizedDigits(Number(activePoint.revenue.toFixed(1)))}</b></span>
+          <small>میلیون تومان</small>
         </div>
       )}
     </div>
   );
 }
 
-function formatRials(value: number) {
-  return `${new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 0 }).format(value)} ریال`;
+function formatMoney(value: number) {
+  return formatTomansFromRials(value);
 }
 
 export function CategoryChart({
@@ -153,7 +155,7 @@ export function CategoryChart({
             type="button"
             role="listitem"
             aria-pressed={index === activeIndex}
-            aria-label={`${item.label}، ${toPersianDigits(item.value)} درصد`}
+            aria-label={`${item.label}، ${toLocalizedDigits(item.value)} درصد`}
             key={item.label}
             onClick={() => setActiveIndex(index)}
           >
@@ -167,8 +169,8 @@ export function CategoryChart({
       </div>
       {active && (
         <div className="category-selection" role="status">
-          <div><small>درآمد این ماه</small><strong>{formatRials(active.revenueRials)}</strong></div>
-          <span>{toPersianDigits(active.invoiceCount)} فاکتور · {toPersianDigits(active.productCount)} محصول</span>
+          <div><small>درآمد این ماه</small><strong>{formatMoney(active.revenueRials)}</strong></div>
+          <span>{toLocalizedDigits(active.invoiceCount)} فاکتور · {toLocalizedDigits(active.productCount)} محصول</span>
           {active.categoryId && onNavigate && (
             <button type="button" onClick={() => onNavigate(`/products?categoryId=${active.categoryId}`)}>
               مشاهده محصولات
@@ -181,7 +183,7 @@ export function CategoryChart({
           <button className="category-progress" type="button" key={item.label} onClick={() => setActiveIndex(index)}>
             <div>
               <span>{item.label}</span>
-              <strong>{toPersianDigits(item.value)}٪</strong>
+              <strong>{toLocalizedDigits(item.value)}٪</strong>
             </div>
             <div className="progress-track">
               <i style={{ width: `${item.value}%` }} />

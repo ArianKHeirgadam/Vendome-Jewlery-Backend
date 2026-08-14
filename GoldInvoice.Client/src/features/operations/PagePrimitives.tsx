@@ -1,18 +1,16 @@
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Inbox, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ArrowUpLeft, Inbox, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
 import type { PropsWithChildren, ReactNode } from "react";
+import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
 
-export const rialFormatter = new Intl.NumberFormat("fa-IR", {
-  maximumFractionDigits: 0,
-});
-
-export function formatRials(value: number): string {
-  return `${rialFormatter.format(value)} ریال`;
+export function formatMoney(valueInRials: number): string {
+  return formatTomansFromRials(valueInRials);
 }
 
 export function formatDate(value?: string | null): string {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+  const locale = activeNumberLocale() === "fa-IR" ? "fa-IR-u-ca-persian" : "en-US";
+  return new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -26,6 +24,8 @@ export function translateStatus(status: string): string {
     Active: "فعال",
     Inactive: "غیرفعال",
     Pending: "در انتظار",
+    Overdue: "معوق",
+    Draft: "پیش‌نویس",
     AwaitingPayment: "در انتظار پرداخت",
     PaymentReview: "بررسی پرداخت",
     Paid: "پرداخت‌شده",
@@ -47,6 +47,16 @@ export function translateStatus(status: string): string {
     Owner: "مالک",
     Admin: "مدیر",
     Customer: "مشتری",
+    Cash: "نقدی",
+    PointOfSale: "کارت‌خوان",
+    BankTransfer: "حواله بانکی",
+    CardToCard: "کارت‌به‌کارت",
+    FixedPrice: "قیمت ثابت",
+    WeightBased: "قیمت وزنی",
+    MarketBased: "نرخ لحظه‌ای",
+    ManualReview: "بررسی دستی",
+    Gold18K: "طلای ۱۸ عیار",
+    Gold24K: "طلای ۲۴ عیار",
   };
   return labels[status] ?? status;
 }
@@ -85,6 +95,64 @@ export function PageHeader({
         )}
       </div>
     </header>
+  );
+}
+
+export function ReferencePageHeader({
+  eyebrow,
+  title,
+  description,
+  actionLabel,
+  onAction,
+  secondary,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  secondary?: ReactNode;
+}) {
+  return (
+    <header className="reference-page-heading fade-up">
+      <div>
+        <p className="eyebrow gold-text">{eyebrow}</p>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+      {(secondary || (actionLabel && onAction)) && (
+        <div className="module-heading-actions">
+          {secondary}
+          {actionLabel && onAction && (
+            <button className="primary-button" type="button" onClick={onAction}>
+              <Plus size={17} /> {actionLabel}
+            </button>
+          )}
+        </div>
+      )}
+    </header>
+  );
+}
+
+export function FeatureNavigationCard({
+  title,
+  description,
+  onClick,
+  meta,
+}: {
+  title: string;
+  description: string;
+  onClick: () => void;
+  meta?: string;
+}) {
+  return (
+    <button className="lux-card reference-feature-card fade-up" type="button" onClick={onClick}>
+      <span className="card-gold-rule" />
+      <ArrowUpLeft className="reference-feature-arrow" size={16} strokeWidth={1.4} />
+      <h2>{title}</h2>
+      <p>{description}</p>
+      {meta && <small>{meta}</small>}
+    </button>
   );
 }
 

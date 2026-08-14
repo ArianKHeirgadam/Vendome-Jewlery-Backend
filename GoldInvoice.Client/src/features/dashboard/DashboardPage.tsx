@@ -99,8 +99,8 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
         <article className="lux-card insight-card revenue-card">
           <header className="card-header">
             <div>
-              <h2>فروش و سود</h2>
-              <p>فروش و سود واقعی پس از بهای خرید و تخفیف، به میلیون ریال</p>
+              <h2>درآمد و سود</h2>
+              <p>فروش و سود واقعی پس از بهای خرید و تخفیف، به میلیون تومان</p>
             </div>
           </header>
           <RevenueChart values={snapshot.revenue} />

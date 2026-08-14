@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { ProfileSummary } from "../features/dashboard/dashboard.types";
 import type { RealtimeStatus } from "../features/integration/useIntegrationRealtime";
+import { useLocale } from "../i18n/LocaleContext";
 
 interface AppHeaderProps {
   profile: ProfileSummary;
@@ -37,6 +38,7 @@ export function AppHeader({
   onToggleSidebar,
   onToggleTheme,
 }: AppHeaderProps) {
+  const { language, toggleLanguage } = useLocale();
   const [search, setSearch] = useState("");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
@@ -109,12 +111,14 @@ export function AppHeader({
           <span className="notification-dot" />
         </button>
         <button
-          className="header-icon-button"
+          className="header-icon-button language-button"
           type="button"
-          aria-label="زبان"
-          onClick={() => onNotice("نسخهٔ فارسی برای رابط دسکتاپ فعال است.")}
+          aria-label={language === "fa" ? "تغییر به انگلیسی" : "تغییر به فارسی"}
+          title={language === "fa" ? "English" : "فارسی"}
+          onClick={toggleLanguage}
         >
           <Languages size={18} strokeWidth={1.55} />
+          <span>{language === "fa" ? "EN" : "فا"}</span>
         </button>
         <button
           className="header-icon-button"

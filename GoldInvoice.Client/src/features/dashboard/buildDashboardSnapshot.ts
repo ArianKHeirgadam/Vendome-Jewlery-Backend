@@ -7,12 +7,10 @@ import type {
   PerformanceMetric,
   ProfileSummary,
 } from "./dashboard.types";
+import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
 
-const rialFormatter = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 0 });
-const percentFormatter = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 1 });
-
-function formatRials(value: number): string {
-  return `${rialFormatter.format(value)} ریال`;
+function formatMoney(value: number): string {
+  return formatTomansFromRials(value);
 }
 
 function actualProfit(invoice: OperationalSnapshot["invoices"][number]): number {
@@ -45,6 +43,7 @@ function trend(current: number, previous: number): Pick<PerformanceMetric, "tren
     return { trend: current > 0 ? "جدید" : "بدون تغییر", direction: "neutral" };
   }
   const change = ((current - previous) / previous) * 100;
+  const percentFormatter = new Intl.NumberFormat(activeNumberLocale(), { maximumFractionDigits: 1 });
   return {
     trend: `${percentFormatter.format(Math.abs(change))}٪`,
     direction: change > 0 ? "up" : change < 0 ? "down" : "neutral",
@@ -60,6 +59,8 @@ export function buildDashboardSnapshot(
   profile: ProfileSummary,
 ): DashboardSnapshot {
   const now = new Date();
+  const locale = activeNumberLocale();
+  const numberFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
   const yesterday = new Date(startOfDay(now).getTime() - 86_400_000);
   const activeInvoices = data.invoices.filter((invoice) => invoice.status !== "Voided");
   const issuedToday = activeInvoices.filter((invoice) => sameDay(invoice.issuedAt, now));
@@ -76,36 +77,47 @@ export function buildDashboardSnapshot(
   const pendingOrders = data.orders.filter((order) =>
     !["Paid", "Completed", "Cancelled", "Refunded"].includes(order.status),
   );
-  const inventoryQuantity = data.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0);
   const inventoryAvailable = data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0);
   const receivables = pendingOrders.reduce((sum, order) => sum + order.grandTotalRials, 0);
+  const latestPurchaseFor = (variantId: string) => data.supplierPurchases
+    .filter((purchase) => purchase.productVariantId === variantId)
+    .sort((left, right) => new Date(right.purchasedAt).getTime() - new Date(left.purchasedAt).getTime())[0];
+  const inventoryValue = data.inventoryItems.reduce((sum, item) =>
+    sum + (latestPurchaseFor(item.productVariantId)?.sellingUnitPriceRials ?? item.averageUnitCostRials) * item.quantityAvailable,
+  0);
+  const customerDeposits = data.orders.reduce((sum, order) => {
+    const verified = data.payments
+      .filter((payment) => payment.orderId === order.id && payment.status === "Verified")
+      .reduce((paymentSum, payment) => paymentSum + payment.amountRials, 0);
+    return sum + Math.max(0, verified - order.grandTotalRials);
+  }, 0);
 
   const metrics: PerformanceMetric[] = [
     {
       id: "today-sales",
       label: "فروش امروز",
-      value: formatRials(salesToday),
-      hint: `${rialFormatter.format(issuedToday.length)} فاکتور`,
+      value: formatMoney(salesToday),
+      hint: `${numberFormatter.format(issuedToday.length)} فاکتور`,
       ...trend(salesToday, salesYesterday),
     },
     {
       id: "today-profit",
-      label: "سود ثبت‌شده امروز",
-      value: formatRials(profitToday),
+      label: "سود امروز",
+      value: formatMoney(profitToday),
       hint: "فروش منهای قیمت خرید و تخفیف",
       ...trend(profitToday, profitYesterday),
     },
     {
       id: "monthly-revenue",
-      label: "درآمد ماه جاری",
-      value: formatRials(monthlyRevenue),
-      hint: `${rialFormatter.format(issuedThisMonth.length)} فاکتور`,
+      label: "درآمد ماهانه",
+      value: formatMoney(monthlyRevenue),
+      hint: `${numberFormatter.format(issuedThisMonth.length)} فاکتور`,
       ...trend(monthlyRevenue, previousRevenue),
     },
     {
       id: "pending-orders",
       label: "سفارش‌های در انتظار",
-      value: rialFormatter.format(pendingOrders.length),
+      value: numberFormatter.format(pendingOrders.length),
       hint: "نیازمند پرداخت یا تکمیل",
       trend: "زنده",
       direction: "neutral",
@@ -113,32 +125,32 @@ export function buildDashboardSnapshot(
     {
       id: "issued-invoices",
       label: "فاکتورهای صادرشده",
-      value: rialFormatter.format(data.invoices.length),
-      hint: `${rialFormatter.format(issuedThisMonth.length)} در ماه جاری`,
+      value: numberFormatter.format(data.invoices.length),
+      hint: `${numberFormatter.format(issuedThisMonth.length)} در ماه جاری`,
       trend: "واقعی",
       direction: "neutral",
     },
     {
       id: "inventory-value",
-      label: "موجودی انبار",
-      value: `${rialFormatter.format(inventoryQuantity)} قطعه`,
-      hint: `${rialFormatter.format(inventoryAvailable)} قابل فروش`,
+      label: "ارزش انبار",
+      value: formatMoney(inventoryValue),
+      hint: `${numberFormatter.format(inventoryAvailable)} قطعه قابل فروش`,
       trend: "زنده",
       direction: "neutral",
     },
     {
       id: "receivables",
-      label: "سفارش‌های تسویه‌نشده",
-      value: formatRials(receivables),
-      hint: `${rialFormatter.format(pendingOrders.length)} سفارش`,
+      label: "مطالبات وصول‌نشده",
+      value: formatMoney(receivables),
+      hint: `${numberFormatter.format(pendingOrders.length)} سفارش`,
       trend: "زنده",
       direction: "neutral",
     },
     {
-      id: "customers",
-      label: "مشتریان ثبت‌شده",
-      value: rialFormatter.format(data.customers.length),
-      hint: "از دیتابیس کاربران",
+      id: "customer-deposits",
+      label: "سپرده مشتریان",
+      value: formatMoney(customerDeposits),
+      hint: "مازاد پرداخت تأییدشده",
       trend: "واقعی",
       direction: "neutral",
     },
@@ -148,9 +160,9 @@ export function buildDashboardSnapshot(
     const date = new Date(now.getFullYear(), now.getMonth() - 6 + index, 1);
     const monthlyInvoices = activeInvoices.filter((invoice) => sameMonth(invoice.issuedAt, date));
     return {
-      month: new Intl.DateTimeFormat("fa-IR-u-ca-persian", { month: "short" }).format(date),
-      revenue: monthlyInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0) / 1_000_000,
-      profit: monthlyInvoices.reduce((sum, invoice) => sum + actualProfit(invoice), 0) / 1_000_000,
+      month: new Intl.DateTimeFormat(locale === "fa-IR" ? "fa-IR-u-ca-persian" : "en-US", { month: "short" }).format(date),
+      revenue: monthlyInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0) / 10_000_000,
+      profit: monthlyInvoices.reduce((sum, invoice) => sum + actualProfit(invoice), 0) / 10_000_000,
     };
   });
 
@@ -202,22 +214,22 @@ export function buildDashboardSnapshot(
     .map((price) => new Date(price.capturedAt))
     .sort((left, right) => right.getTime() - left.getTime())[0];
   const quote = (price: MarketPrice | undefined, side: "buy" | "sell") =>
-    price ? formatRials(side === "buy" ? price.buyPriceRials : price.sellPriceRials) : "ثبت نشده";
+    price ? formatMoney(side === "buy" ? price.buyPriceRials : price.sellPriceRials) : "ثبت نشده";
 
   return {
     profile,
     quickOperations: [
-      { id: "new-invoice", title: "فاکتور جدید", description: "ساخت سفارش، تسویه و صدور فاکتور رسمی.", meta: "شروع عملیات", path: "/orders/new" },
-      { id: "new-customer", title: "مشتری جدید", description: "ثبت امن مشتری و اطلاعات تماس او.", meta: `${rialFormatter.format(data.customers.length)} مشتری`, path: "/customers?new=1" },
-      { id: "new-product", title: "کالای جدید", description: "ثبت محصول، مدل طلا و مشخصات قیمت‌گذاری.", meta: `${rialFormatter.format(data.products.length)} محصول`, path: "/products?new=1" },
-      { id: "inventory-receipt", title: "خرید از تأمین‌کننده", description: "ثبت تعداد، قیمت خرید و قیمت فروش دستی.", meta: `${rialFormatter.format(inventoryAvailable)} آماده فروش`, path: "/suppliers?purchase=1" },
-      { id: "settlement", title: "تسویه سفارش", description: "ثبت پرداخت و صدور خودکار فاکتور.", meta: `${rialFormatter.format(pendingOrders.length)} در انتظار`, path: "/orders?settle=1" },
-      { id: "daily-report", title: "گزارش روز", description: "مرور فروش، سود و وضعیت عملیات امروز.", meta: formatRials(salesToday), path: "/reports" },
+      { id: "daily-operations", title: "عملیات روزانه", description: "باز کردن صندوق، مرور فعالیت روز و بستن دفاتر.", meta: `${numberFormatter.format(issuedToday.length)} فاکتور امروز`, path: "/reports/sales" },
+      { id: "trust-funds", title: "وجوه امانی", description: "سپرده‌های امانی مشتریان، تخصیص‌ها و آزادسازی‌ها.", meta: formatMoney(customerDeposits), path: "/customers" },
+      { id: "installments", title: "اقساط", description: "فروش اقساطی، جدول پرداخت و وضعیت وصول.", meta: `${numberFormatter.format(pendingOrders.length)} در انتظار`, path: "/orders" },
+      { id: "invoice-settlement", title: "تسویه فاکتور", description: "دریافت وجه، تسویه مانده‌ها و مرور تاریخچه پرداخت.", meta: formatMoney(receivables), path: "/orders?settle=1" },
+      { id: "bank-interest", title: "سود بانکی", description: "سود دریافتی سپرده‌ها و سود پرداختی تسهیلات.", meta: "اطلاعات مالی واقعی", path: "/accounting" },
+      { id: "bank-loans", title: "وام‌های بانکی", description: "تسهیلات، مانده بدهی، اقساط ماهانه و سود.", meta: "اطلاعات مالی واقعی", path: "/accounting" },
     ],
     metrics,
     market: {
       updatedAt: latestMarketDate
-        ? new Intl.DateTimeFormat("fa-IR", { hour: "2-digit", minute: "2-digit" }).format(latestMarketDate)
+        ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(latestMarketDate)
         : "نرخی ثبت نشده",
       goldPrices: [
         { label: "طلای ۱۸ عیار", value: quote(gold18, "sell") },
@@ -241,15 +253,15 @@ export function buildDashboardSnapshot(
     transactions: data.invoices.slice(0, 5).map((invoice) => ({
       id: invoice.id,
       customer: invoice.customerNameSnapshot || "مشتری ثبت‌شده",
-      detail: `${new Intl.DateTimeFormat("fa-IR", { hour: "2-digit", minute: "2-digit" }).format(new Date(invoice.issuedAt))} · فاکتور ${invoice.invoiceNumber}`,
-      amount: `+${formatRials(invoice.grandTotalRials)}`,
+      detail: `${new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(new Date(invoice.issuedAt))} · فاکتور ${invoice.invoiceNumber}`,
+      amount: `+${formatMoney(invoice.grandTotalRials)}`,
       positive: invoice.status !== "Voided",
     })),
     upcomingPayments: pendingOrders.slice(0, 4).map((order) => ({
       id: order.id,
       title: `سفارش ${order.orderNumber} · ${order.customerNameSnapshot || "مشتری"}`,
       dueDate: "در انتظار تسویه",
-      amount: formatRials(order.grandTotalRials),
+      amount: formatMoney(order.grandTotalRials),
     })),
   };
 }

@@ -12,6 +12,7 @@ import {
   EyeOff,
   KeyRound,
   LoaderCircle,
+  Languages,
   LockKeyhole,
   ServerCog,
   ShieldCheck,
@@ -20,6 +21,7 @@ import {
 import { ApiError } from "./authApi";
 import { useAuthentication } from "./AuthContext";
 import type { LoginStatus, MfaSetupResult } from "./auth.types";
+import { useLocale } from "../../i18n/LocaleContext";
 
 type LoginStage = "credentials" | "mfa" | "mfa-enrollment";
 
@@ -45,6 +47,7 @@ export function AuthenticationSplash() {
 }
 
 export function LoginPage() {
+  const { language, toggleLanguage } = useLocale();
   const {
     runtime,
     login,
@@ -154,6 +157,15 @@ export function LoginPage() {
 
   return (
     <main className="auth-page">
+      <button
+        className="auth-language-button"
+        type="button"
+        aria-label={language === "fa" ? "تغییر به انگلیسی" : "تغییر به فارسی"}
+        onClick={toggleLanguage}
+      >
+        <Languages size={17} />
+        <span>{language === "fa" ? "English" : "فارسی"}</span>
+      </button>
       <section className="auth-brand-panel" aria-label="مِزون وندوم">
         <div className="auth-brand-content">
           <span className="auth-eyebrow">JEWELRY MANAGEMENT SUITE</span>
