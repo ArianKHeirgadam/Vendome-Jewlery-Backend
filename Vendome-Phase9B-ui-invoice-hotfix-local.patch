@@ -1,0 +1,158 @@
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index a6813ca..55ace5d 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -39,4 +39,5 @@ import { useOperations } from "./OperationsContext";
+ import { useInventoryScanner } from "./useInventoryScanner";
+ import { SupplierPurchasesPage } from "./SupplierPurchasesPage";
++import "./operations-hotfixes.css";
+ import {
+   EmptyState,
+@@ -103,4 +104,26 @@ function optionalText(form: FormData, name: string): string | null {
+ }
+ 
++function invoiceWithCurrentStoreProfile(
++  invoice: Invoice,
++  storeProfile: StoreProfile | null,
++): Invoice {
++  if (!storeProfile) return invoice;
++
++  return {
++    ...invoice,
++    store: {
++      id: invoice.store?.id || "current-store-profile",
++      tradeName: storeProfile.tradeName,
++      legalName: storeProfile.legalName,
++      nationalId: storeProfile.nationalId,
++      economicCode: storeProfile.economicCode,
++      registrationNumber: storeProfile.registrationNumber,
++      phoneNumber: storeProfile.phoneNumber,
++      postalCode: storeProfile.postalCode,
++      addressLine: storeProfile.addressLine,
++    },
++  };
++}
++
+ function invoiceActualProfit(invoice: Invoice): number {
+   const knownItems = invoice.items.filter((item) => item.grossProfitRials != null);
+@@ -236,4 +259,6 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+     copies = 1,
+   ) => {
++    const printableInvoice = invoiceWithCurrentStoreProfile(invoice, data.storeProfile);
++
+     if (!isDesktopHost()) {
+       if (action === "print") {
+@@ -241,5 +266,5 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+         if (!preview) throw new Error("Ù…Ø±ÙˆØ±Ú¯Ø± Ø§Ø¬Ø§Ø²Ù‡ Ø¨Ø§Ø²Ú©Ø±Ø¯Ù† Ù¾ÛŒØ´â€ŒÙ†Ù…Ø§ÛŒØ´ Ú†Ø§Ù¾ Ø±Ø§ Ù†Ø¯Ø§Ø¯.");
+         preview.document.open();
+-        preview.document.write(buildInvoiceDocumentHtml(invoice));
++        preview.document.write(buildInvoiceDocumentHtml(printableInvoice));
+         preview.document.close();
+         preview.focus();
+@@ -252,5 +277,5 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+     return sendDesktopCommand<InvoiceDesktopResult>("invoice.document", {
+       action,
+-      html: buildInvoiceDocumentHtml(invoice),
++      html: buildInvoiceDocumentHtml(printableInvoice),
+       suggestedFileName: invoiceFileName(invoice),
+       copies,
+@@ -484,4 +509,7 @@ function InvoiceDetails({
+   canPrint: boolean;
+ }) {
++  const { data } = useOperations();
++  const printableInvoice = invoiceWithCurrentStoreProfile(invoice, data.storeProfile);
++
+   return (
+     <div className="invoice-preview-panel">
+@@ -491,5 +519,5 @@ function InvoiceDetails({
+         <button className="primary-button" type="button" onClick={onPrint} disabled={invoice.status !== "Issued" || !canPrint}><Printer size={15} /> Ú†Ø§Ù¾ ÙØ§Ú©ØªÙˆØ±</button>
+       </div>
+-      <iframe className="invoice-preview-frame" title={`Ù¾ÛŒØ´â€ŒÙ†Ù…Ø§ÛŒØ´ ÙØ§Ú©ØªÙˆØ± ${invoice.invoiceNumber}`} srcDoc={buildInvoiceDocumentHtml(invoice)} sandbox="" />
++      <iframe className="invoice-preview-frame" title={`Ù¾ÛŒØ´â€ŒÙ†Ù…Ø§ÛŒØ´ ÙØ§Ú©ØªÙˆØ± ${invoice.invoiceNumber}`} srcDoc={buildInvoiceDocumentHtml(printableInvoice)} sandbox="" />
+     </div>
+   );
+diff --git a/GoldInvoice.Client/src/features/operations/operations-hotfixes.css b/GoldInvoice.Client/src/features/operations/operations-hotfixes.css
+new file mode 100644
+index 0000000..16c8581
+--- /dev/null
++++ b/GoldInvoice.Client/src/features/operations/operations-hotfixes.css
+@@ -0,0 +1,79 @@
++/*
++ * Phase 9B UI hardening.
++ * Scoped overrides only: preserve the existing Vendome visual design.
++ */
++
++/* Supplier purchase wizard: keep the modal usable on short/small desktop viewports. */
++.modal-layer:has(.purchase-wizard) {
++  overflow-y: auto;
++  overscroll-behavior: contain;
++}
++
++.modal-card:has(.purchase-wizard) {
++  max-height: calc(100dvh - 32px);
++}
++
++.modal-card:has(.purchase-wizard) .modal-body {
++  max-height: calc(100dvh - 132px);
++  overflow-y: auto;
++  overscroll-behavior: contain;
++  scrollbar-gutter: stable;
++}
++
++.purchase-wizard,
++.wizard-panel {
++  min-width: 0;
++}
++
++/* Dark-mode contrast: primary actions must not blend into the dark page background. */
++:root[data-theme="dark"] .primary-button {
++  color: #fffdf8;
++  background: color-mix(in oklch, var(--navy-soft) 88%, var(--gold) 12%);
++  border-color: color-mix(in oklch, var(--gold) 30%, var(--border));
++}
++
++:root[data-theme="dark"] .primary-button:hover:not(:disabled) {
++  color: #ffffff;
++  background: color-mix(in oklch, var(--navy-soft) 76%, var(--gold) 24%);
++  border-color: color-mix(in oklch, var(--gold) 48%, var(--border));
++}
++
++:root[data-theme="dark"] .primary-button:focus-visible {
++  outline-color: color-mix(in oklch, var(--gold) 75%, white);
++}
++
++:root[data-theme="dark"] .wizard-steps .is-current button > span {
++  color: #fffdf8;
++  background: color-mix(in oklch, var(--navy-soft) 88%, var(--gold) 12%);
++  border-color: color-mix(in oklch, var(--gold) 35%, var(--border));
++}
++
++@media (max-height: 760px) {
++  .modal-layer:has(.purchase-wizard) {
++    padding-block: 16px;
++    place-items: start center;
++  }
++
++  .modal-card:has(.purchase-wizard) {
++    max-height: calc(100dvh - 32px);
++  }
++
++  .modal-card:has(.purchase-wizard) .modal-body {
++    max-height: calc(100dvh - 118px);
++  }
++
++  .wizard-panel {
++    min-height: 0;
++  }
++}
++
++@media (max-width: 760px) {
++  .wizard-steps {
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++    row-gap: 12px;
++  }
++
++  .wizard-steps li:not(:last-child)::after {
++    display: none;
++  }
++}

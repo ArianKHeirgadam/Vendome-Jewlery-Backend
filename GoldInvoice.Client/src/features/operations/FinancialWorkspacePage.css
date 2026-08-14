@@ -1,0 +1,188 @@
+.financial-workspace-page {
+  min-width: 0;
+}
+
+.financial-warehouse-section,
+.financial-person-section {
+  padding: 22px;
+}
+
+.financial-section-heading {
+  display: flex;
+  align-items: center;
+  margin-bottom: 18px;
+  gap: 12px;
+}
+
+.financial-section-heading h2 {
+  margin: 0 0 3px;
+  font-size: 18px;
+}
+
+.financial-section-heading p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.financial-section-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  color: var(--gold);
+  background: color-mix(in oklch, var(--gold) 10%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--gold) 30%, var(--border));
+  border-radius: 12px;
+}
+
+.financial-overview-grid,
+.financial-mini-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 20px;
+  gap: 10px;
+}
+
+.financial-overview-grid article,
+.financial-mini-metrics > div {
+  min-width: 0;
+  padding: 14px;
+  background: color-mix(in oklch, var(--background) 58%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.financial-overview-grid span,
+.financial-mini-metrics span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.financial-overview-grid strong,
+.financial-mini-metrics strong {
+  display: block;
+  color: var(--foreground);
+  font-family: "Vazirmatn", sans-serif;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.financial-entry-form {
+  margin-bottom: 18px;
+}
+
+.financial-form-submit {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+}
+
+.financial-form-submit .primary-button {
+  min-height: 42px;
+}
+.financial-warehouse-section .financial-form-submit {
+  grid-column: 1 / -1;
+  justify-content: center;
+}
+
+.financial-warehouse-section .financial-form-submit .primary-button {
+  min-width: 180px;
+}
+
+.financial-warehouse-expense {
+  color: var(--danger) !important;
+}
+
+.financial-people-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+  gap: 18px;
+}
+
+.financial-person-section {
+  min-width: 0;
+}
+
+.financial-person-table {
+  min-width: 520px;
+}
+
+.financial-type-badge {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  padding: 0 9px;
+  color: color-mix(in oklch, var(--gold) 88%, var(--foreground));
+  background: color-mix(in oklch, var(--gold) 9%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--gold) 34%, var(--border));
+  border-radius: 999px;
+  font-size: 9px;
+}
+
+.financial-neutral-amount {
+  color: var(--foreground);
+}
+
+.financial-workspace-note {
+  display: flex;
+  align-items: center;
+  margin-top: 16px;
+  padding: 11px 13px;
+  gap: 8px;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--gold) 5%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 9px;
+}
+
+.financial-workspace-note svg {
+  color: var(--gold);
+}
+
+@media (max-width: 1120px) {
+  .financial-people-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .financial-overview-grid,
+  .financial-mini-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .financial-warehouse-section,
+  .financial-person-section {
+    padding: 16px;
+  }
+}
+
+/* VENDOME_STAFF_FINANCE_V9_START */
+/* Houman/Ali only: prevent long monetary values from escaping their cards. */
+.financial-mini-metrics strong {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.financial-person-table .financial-neutral-amount,
+.financial-person-table .financial-person-expense {
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* Expense is red. Asset keeps the existing neutral Vendome color. */
+.financial-person-expense {
+  color: var(--danger) !important;
+}
+/* VENDOME_STAFF_FINANCE_V9_END */

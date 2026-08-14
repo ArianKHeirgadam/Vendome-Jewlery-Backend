@@ -220,11 +220,11 @@ export function buildDashboardSnapshot(
     profile,
     quickOperations: [
       { id: "daily-operations", title: "عملیات روزانه", description: "باز کردن صندوق، مرور فعالیت روز و بستن دفاتر.", meta: `${numberFormatter.format(issuedToday.length)} فاکتور امروز`, path: "/reports/sales" },
-      { id: "trust-funds", title: "وجوه امانی", description: "سپرده‌های امانی مشتریان، تخصیص‌ها و آزادسازی‌ها.", meta: formatMoney(customerDeposits), path: "/customers" },
-      { id: "installments", title: "اقساط", description: "فروش اقساطی، جدول پرداخت و وضعیت وصول.", meta: `${numberFormatter.format(pendingOrders.length)} در انتظار`, path: "/orders" },
+      { id: "trust-funds", title: "وجوه امانی", description: "سپرده‌های امانی مشتریان، تخصیص‌ها و آزادسازی‌ها.", meta: formatMoney(customerDeposits), path: "/accounting/trust-funds" },
+      { id: "installments", title: "اقساط", description: "فروش اقساطی، جدول پرداخت و وضعیت وصول.", meta: `${numberFormatter.format(pendingOrders.length)} در انتظار`, path: "/accounting/installments" },
       { id: "invoice-settlement", title: "تسویه فاکتور", description: "دریافت وجه، تسویه مانده‌ها و مرور تاریخچه پرداخت.", meta: formatMoney(receivables), path: "/orders?settle=1" },
-      { id: "bank-interest", title: "سود بانکی", description: "سود دریافتی سپرده‌ها و سود پرداختی تسهیلات.", meta: "اطلاعات مالی واقعی", path: "/accounting" },
-      { id: "bank-loans", title: "وام‌های بانکی", description: "تسهیلات، مانده بدهی، اقساط ماهانه و سود.", meta: "اطلاعات مالی واقعی", path: "/accounting" },
+      { id: "bank-interest", title: "سود بانکی", description: "سود دریافتی سپرده‌ها و سود پرداختی تسهیلات.", meta: "اطلاعات مالی واقعی", path: "/accounting/bank-interest" },
+      { id: "financial-workspace", title: locale === "en-US" ? "Assets & Expenses" : "دارایی‌ها و هزینه‌ها", description: locale === "en-US" ? "Inventory value and financial ledgers for Houman and Ali." : "موجودی انبار و دفتر مالی هومن و علی.", meta: formatMoney(inventoryValue), path: "/financial-workspace" },
     ],
     metrics,
     market: {
@@ -233,15 +233,15 @@ export function buildDashboardSnapshot(
         : "نرخی ثبت نشده",
       goldPrices: [
         { label: "طلای ۱۸ عیار", value: quote(gold18, "sell") },
-        { label: "طلای ۲۴ عیار", value: quote(gold24, "sell") },
+        { label: "طلای ۲۴ عیار (محاسباتی)", value: quote(gold24, "sell") },
       ],
       trading: [
         { label: "خرید طلای ۱۸", value: quote(gold18, "buy") },
         { label: "فروش طلای ۱۸", value: quote(gold18, "sell") },
       ],
       currencies: [
-        { label: "خرید ارز", value: quote(currency, "buy") },
-        { label: "فروش ارز", value: quote(currency, "sell") },
+        { label: "دلار تهران خرید", value: quote(currency, "buy") },
+        { label: "دلار تهران فروش", value: quote(currency, "sell") },
       ],
       isOpen: now.getHours() >= 9 && now.getHours() < 17,
       hours: "باز ۰۹:۰۰ · بسته ۱۷:۰۰",

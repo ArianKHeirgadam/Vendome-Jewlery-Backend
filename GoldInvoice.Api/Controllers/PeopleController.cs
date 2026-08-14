@@ -52,7 +52,8 @@ public sealed class PeopleController(IPeopleDirectoryService peopleService) : Co
                 request.DisplayName,
                 request.Email,
                 request.PhoneNumber,
-                request.TemporaryPassword),
+                request.TemporaryPassword,
+                request.RoleName),
             cancellationToken);
         return CreatedAtAction(nameof(GetEmployees), Map(person));
     }

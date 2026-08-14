@@ -38,9 +38,12 @@ public sealed class CreateEmployeeRequest
     [Required, EmailAddress, StringLength(256)]
     public string Email { get; init; } = string.Empty;
 
-    [StringLength(32)]
-    public string? PhoneNumber { get; init; }
+    [Required, StringLength(32, MinimumLength = 7)]
+    public string PhoneNumber { get; init; } = string.Empty;
 
     [Required, MinLength(12), MaxLength(128)]
     public string TemporaryPassword { get; init; } = string.Empty;
+
+    [Required, RegularExpression("^(Admin|Employee)$")]
+    public string RoleName { get; init; } = "Employee";
 }

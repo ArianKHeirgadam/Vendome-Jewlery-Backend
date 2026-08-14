@@ -1,0 +1,2693 @@
+diff --git a/GoldInvoice.Client/src/app/App.tsx b/GoldInvoice.Client/src/app/App.tsx
+index a37b7a645d8ea7278f3af6a79379da8cb300e0bc..289a6048e4ba2ab6d43ad4db016d82a2578511f4 100644
+--- a/GoldInvoice.Client/src/app/App.tsx
++++ b/GoldInvoice.Client/src/app/App.tsx
+@@ -17,6 +17,7 @@ import {
+ } from "../features/integration/useIntegrationRealtime";
+ import { OperationsProvider, useOperations } from "../features/operations/OperationsContext";
+ import { OperationsRouter } from "../features/operations/OperationsPages";
++import { useLocale, type AppLanguage } from "../i18n/LocaleContext";
+ 
+ type Theme = "light" | "dark";
+ 
+@@ -65,18 +66,19 @@ function eventNotice(event: IntegrationEvent): string {
+ 
+ export function App() {
+   const auth = useAuthentication();
++  const { language } = useLocale();
+ 
+   if (auth.status === "booting") return <AuthenticationSplash />;
+   if (auth.recoveryCodes) return <RecoveryCodesPage />;
+   if (auth.status === "anonymous") return <LoginPage />;
+   return (
+     <OperationsProvider>
+-      <AuthenticatedApplication />
++      <AuthenticatedApplication language={language} />
+     </OperationsProvider>
+   );
+ }
+ 
+-function AuthenticatedApplication() {
++function AuthenticatedApplication({ language }: { language: AppLanguage }) {
+   const auth = useAuthentication();
+   const operations = useOperations();
+   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+@@ -137,7 +139,7 @@ function AuthenticatedApplication() {
+   const isDashboard = currentPath === "/" || currentPath === "/dashboard";
+ 
+   return (
+-    <div className="app-shell">
++    <div className="app-shell" data-language={language}>
+       <AppHeader
+         profile={profile}
+         theme={theme}
+diff --git a/GoldInvoice.Client/src/components/AppHeader.tsx b/GoldInvoice.Client/src/components/AppHeader.tsx
+index 1679b8895a32cfe2b56ba58a4b02a2e10d311b6f..98f20bc831597f1aac799e8cda9b05d443d67b68 100644
+--- a/GoldInvoice.Client/src/components/AppHeader.tsx
++++ b/GoldInvoice.Client/src/components/AppHeader.tsx
+@@ -15,6 +15,7 @@ import {
+ } from "lucide-react";
+ import type { ProfileSummary } from "../features/dashboard/dashboard.types";
+ import type { RealtimeStatus } from "../features/integration/useIntegrationRealtime";
++import { useLocale } from "../i18n/LocaleContext";
+ 
+ interface AppHeaderProps {
+   profile: ProfileSummary;
+@@ -37,6 +38,7 @@ export function AppHeader({
+   onToggleSidebar,
+   onToggleTheme,
+ }: AppHeaderProps) {
++  const { language, toggleLanguage } = useLocale();
+   const [search, setSearch] = useState("");
+   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+ 
+@@ -109,12 +111,14 @@ export function AppHeader({
+           <span className="notification-dot" />
+         </button>
+         <button
+-          className="header-icon-button"
++          className="header-icon-button language-button"
+           type="button"
+-          aria-label="زبان"
+-          onClick={() => onNotice("نسخهٔ فارسی برای رابط دسکتاپ فعال است.")}
++          aria-label={language === "fa" ? "تغییر به انگلیسی" : "تغییر به فارسی"}
++          title={language === "fa" ? "English" : "فارسی"}
++          onClick={toggleLanguage}
+         >
+           <Languages size={18} strokeWidth={1.55} />
++          <span>{language === "fa" ? "EN" : "فا"}</span>
+         </button>
+         <button
+           className="header-icon-button"
+diff --git a/GoldInvoice.Client/src/features/auth/AuthPages.tsx b/GoldInvoice.Client/src/features/auth/AuthPages.tsx
+index 72528d5fd7cf883d2b177b166d7b93aca441d03c..3035b2b4b5d0a86c1bd548e1521926785db43bf1 100644
+--- a/GoldInvoice.Client/src/features/auth/AuthPages.tsx
++++ b/GoldInvoice.Client/src/features/auth/AuthPages.tsx
+@@ -12,6 +12,7 @@ import {
+   EyeOff,
+   KeyRound,
+   LoaderCircle,
++  Languages,
+   LockKeyhole,
+   ServerCog,
+   ShieldCheck,
+@@ -20,6 +21,7 @@ import {
+ import { ApiError } from "./authApi";
+ import { useAuthentication } from "./AuthContext";
+ import type { LoginStatus, MfaSetupResult } from "./auth.types";
++import { useLocale } from "../../i18n/LocaleContext";
+ 
+ type LoginStage = "credentials" | "mfa" | "mfa-enrollment";
+ 
+@@ -45,6 +47,7 @@ export function AuthenticationSplash() {
+ }
+ 
+ export function LoginPage() {
++  const { language, toggleLanguage } = useLocale();
+   const {
+     runtime,
+     login,
+@@ -154,6 +157,15 @@ export function LoginPage() {
+ 
+   return (
+     <main className="auth-page">
++      <button
++        className="auth-language-button"
++        type="button"
++        aria-label={language === "fa" ? "تغییر به انگلیسی" : "تغییر به فارسی"}
++        onClick={toggleLanguage}
++      >
++        <Languages size={17} />
++        <span>{language === "fa" ? "English" : "فارسی"}</span>
++      </button>
+       <section className="auth-brand-panel" aria-label="مِزون وندوم">
+         <div className="auth-brand-content">
+           <span className="auth-eyebrow">JEWELRY MANAGEMENT SUITE</span>
+diff --git a/GoldInvoice.Client/src/features/dashboard/DashboardCharts.tsx b/GoldInvoice.Client/src/features/dashboard/DashboardCharts.tsx
+index a25d20fd1ad9320ca786439233c73fd0c5d7003d..b2dabc94876be113d3dc685fecbc7715ded537ee 100644
+--- a/GoldInvoice.Client/src/features/dashboard/DashboardCharts.tsx
++++ b/GoldInvoice.Client/src/features/dashboard/DashboardCharts.tsx
+@@ -3,12 +3,14 @@ import type {
+   CategoryShare,
+   RevenuePoint,
+ } from "./dashboard.types";
++import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
+ 
+ interface RevenueChartProps {
+   values: RevenuePoint[];
+ }
+ 
+-function toPersianDigits(value: number) {
++function toLocalizedDigits(value: number) {
++  if (activeNumberLocale() === "en-US") return value.toString().replace("-", "−");
+   return value.toString()
+     .replace("-", "−")
+     .replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
+@@ -75,7 +77,7 @@ export function RevenueChart({ values }: RevenueChartProps) {
+             <g key={y}>
+               <line className="chart-grid-line" x1="0" x2={width} y1={y} y2={y} />
+               <text className="chart-y-label" x="-9" y={y + 4} textAnchor="end">
+-                {toPersianDigits(Math.round(max - ((max - min) * index) / 4))}
++                {toLocalizedDigits(Math.round(max - ((max - min) * index) / 4))}
+               </text>
+             </g>
+           ))}
+@@ -120,17 +122,17 @@ export function RevenueChart({ values }: RevenueChartProps) {
+       {activePoint && (
+         <div className="chart-tooltip" style={{ left: `${tooltipLeft}%` }} role="status">
+           <strong>{activePoint.month}</strong>
+-          <span><i className="chart-legend-dot chart-legend-dot--profit" /> سود <b>{toPersianDigits(Number(activePoint.profit.toFixed(1)))}</b></span>
+-          <span><i className="chart-legend-dot chart-legend-dot--sales" /> فروش <b>{toPersianDigits(Number(activePoint.revenue.toFixed(1)))}</b></span>
+-          <small>میلیون ریال</small>
++          <span><i className="chart-legend-dot chart-legend-dot--profit" /> سود <b>{toLocalizedDigits(Number(activePoint.profit.toFixed(1)))}</b></span>
++          <span><i className="chart-legend-dot chart-legend-dot--sales" /> فروش <b>{toLocalizedDigits(Number(activePoint.revenue.toFixed(1)))}</b></span>
++          <small>میلیون تومان</small>
+         </div>
+       )}
+     </div>
+   );
+ }
+ 
+-function formatRials(value: number) {
+-  return `${new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 0 }).format(value)} ریال`;
++function formatMoney(value: number) {
++  return formatTomansFromRials(value);
+ }
+ 
+ export function CategoryChart({
+@@ -153,7 +155,7 @@ export function CategoryChart({
+             type="button"
+             role="listitem"
+             aria-pressed={index === activeIndex}
+-            aria-label={`${item.label}، ${toPersianDigits(item.value)} درصد`}
++            aria-label={`${item.label}، ${toLocalizedDigits(item.value)} درصد`}
+             key={item.label}
+             onClick={() => setActiveIndex(index)}
+           >
+@@ -167,8 +169,8 @@ export function CategoryChart({
+       </div>
+       {active && (
+         <div className="category-selection" role="status">
+-          <div><small>درآمد این ماه</small><strong>{formatRials(active.revenueRials)}</strong></div>
+-          <span>{toPersianDigits(active.invoiceCount)} فاکتور · {toPersianDigits(active.productCount)} محصول</span>
++          <div><small>درآمد این ماه</small><strong>{formatMoney(active.revenueRials)}</strong></div>
++          <span>{toLocalizedDigits(active.invoiceCount)} فاکتور · {toLocalizedDigits(active.productCount)} محصول</span>
+           {active.categoryId && onNavigate && (
+             <button type="button" onClick={() => onNavigate(`/products?categoryId=${active.categoryId}`)}>
+               مشاهده محصولات
+@@ -181,7 +183,7 @@ export function CategoryChart({
+           <button className="category-progress" type="button" key={item.label} onClick={() => setActiveIndex(index)}>
+             <div>
+               <span>{item.label}</span>
+-              <strong>{toPersianDigits(item.value)}٪</strong>
++              <strong>{toLocalizedDigits(item.value)}٪</strong>
+             </div>
+             <div className="progress-track">
+               <i style={{ width: `${item.value}%` }} />
+diff --git a/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx b/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx
+index 0afc4865c6852fcbcee1a61cba2f9c4224d0680f..0767e772c7a282a1dc73eeb9b04843bb950ff524 100644
+--- a/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx
++++ b/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx
+@@ -100,7 +100,7 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
+           <header className="card-header">
+             <div>
+               <h2>فروش و سود</h2>
+-              <p>فروش و سود واقعی پس از بهای خرید و تخفیف، به میلیون ریال</p>
++              <p>فروش و سود واقعی پس از بهای خرید و تخفیف، به میلیون تومان</p>
+             </div>
+           </header>
+           <RevenueChart values={snapshot.revenue} />
+diff --git a/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts b/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts
+index 6217b209c4fac3a8a9e109b19535648769e3a986..806dfc052fe3879c3cdfbc183b2506cdcad3029e 100644
+--- a/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts
++++ b/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts
+@@ -7,12 +7,10 @@ import type {
+   PerformanceMetric,
+   ProfileSummary,
+ } from "./dashboard.types";
++import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
+ 
+-const rialFormatter = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 0 });
+-const percentFormatter = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 1 });
+-
+-function formatRials(value: number): string {
+-  return `${rialFormatter.format(value)} ریال`;
++function formatMoney(value: number): string {
++  return formatTomansFromRials(value);
+ }
+ 
+ function actualProfit(invoice: OperationalSnapshot["invoices"][number]): number {
+@@ -45,6 +43,7 @@ function trend(current: number, previous: number): Pick<PerformanceMetric, "tren
+     return { trend: current > 0 ? "جدید" : "بدون تغییر", direction: "neutral" };
+   }
+   const change = ((current - previous) / previous) * 100;
++  const percentFormatter = new Intl.NumberFormat(activeNumberLocale(), { maximumFractionDigits: 1 });
+   return {
+     trend: `${percentFormatter.format(Math.abs(change))}٪`,
+     direction: change > 0 ? "up" : change < 0 ? "down" : "neutral",
+@@ -60,6 +59,8 @@ export function buildDashboardSnapshot(
+   profile: ProfileSummary,
+ ): DashboardSnapshot {
+   const now = new Date();
++  const locale = activeNumberLocale();
++  const numberFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
+   const yesterday = new Date(startOfDay(now).getTime() - 86_400_000);
+   const activeInvoices = data.invoices.filter((invoice) => invoice.status !== "Voided");
+   const issuedToday = activeInvoices.filter((invoice) => sameDay(invoice.issuedAt, now));
+@@ -84,28 +85,28 @@ export function buildDashboardSnapshot(
+     {
+       id: "today-sales",
+       label: "فروش امروز",
+-      value: formatRials(salesToday),
+-      hint: `${rialFormatter.format(issuedToday.length)} فاکتور`,
++      value: formatMoney(salesToday),
++      hint: `${numberFormatter.format(issuedToday.length)} فاکتور`,
+       ...trend(salesToday, salesYesterday),
+     },
+     {
+       id: "today-profit",
+       label: "سود ثبت‌شده امروز",
+-      value: formatRials(profitToday),
++      value: formatMoney(profitToday),
+       hint: "فروش منهای قیمت خرید و تخفیف",
+       ...trend(profitToday, profitYesterday),
+     },
+     {
+       id: "monthly-revenue",
+       label: "درآمد ماه جاری",
+-      value: formatRials(monthlyRevenue),
+-      hint: `${rialFormatter.format(issuedThisMonth.length)} فاکتور`,
++      value: formatMoney(monthlyRevenue),
++      hint: `${numberFormatter.format(issuedThisMonth.length)} فاکتور`,
+       ...trend(monthlyRevenue, previousRevenue),
+     },
+     {
+       id: "pending-orders",
+       label: "سفارش‌های در انتظار",
+-      value: rialFormatter.format(pendingOrders.length),
++      value: numberFormatter.format(pendingOrders.length),
+       hint: "نیازمند پرداخت یا تکمیل",
+       trend: "زنده",
+       direction: "neutral",
+@@ -113,31 +114,31 @@ export function buildDashboardSnapshot(
+     {
+       id: "issued-invoices",
+       label: "فاکتورهای صادرشده",
+-      value: rialFormatter.format(data.invoices.length),
+-      hint: `${rialFormatter.format(issuedThisMonth.length)} در ماه جاری`,
++      value: numberFormatter.format(data.invoices.length),
++      hint: `${numberFormatter.format(issuedThisMonth.length)} در ماه جاری`,
+       trend: "واقعی",
+       direction: "neutral",
+     },
+     {
+       id: "inventory-value",
+       label: "موجودی انبار",
+-      value: `${rialFormatter.format(inventoryQuantity)} قطعه`,
+-      hint: `${rialFormatter.format(inventoryAvailable)} قابل فروش`,
++      value: `${numberFormatter.format(inventoryQuantity)} قطعه`,
++      hint: `${numberFormatter.format(inventoryAvailable)} قابل فروش`,
+       trend: "زنده",
+       direction: "neutral",
+     },
+     {
+       id: "receivables",
+       label: "سفارش‌های تسویه‌نشده",
+-      value: formatRials(receivables),
+-      hint: `${rialFormatter.format(pendingOrders.length)} سفارش`,
++      value: formatMoney(receivables),
++      hint: `${numberFormatter.format(pendingOrders.length)} سفارش`,
+       trend: "زنده",
+       direction: "neutral",
+     },
+     {
+       id: "customers",
+       label: "مشتریان ثبت‌شده",
+-      value: rialFormatter.format(data.customers.length),
++      value: numberFormatter.format(data.customers.length),
+       hint: "از دیتابیس کاربران",
+       trend: "واقعی",
+       direction: "neutral",
+@@ -148,9 +149,9 @@ export function buildDashboardSnapshot(
+     const date = new Date(now.getFullYear(), now.getMonth() - 6 + index, 1);
+     const monthlyInvoices = activeInvoices.filter((invoice) => sameMonth(invoice.issuedAt, date));
+     return {
+-      month: new Intl.DateTimeFormat("fa-IR-u-ca-persian", { month: "short" }).format(date),
+-      revenue: monthlyInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0) / 1_000_000,
+-      profit: monthlyInvoices.reduce((sum, invoice) => sum + actualProfit(invoice), 0) / 1_000_000,
++      month: new Intl.DateTimeFormat(locale === "fa-IR" ? "fa-IR-u-ca-persian" : "en-US", { month: "short" }).format(date),
++      revenue: monthlyInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0) / 10_000_000,
++      profit: monthlyInvoices.reduce((sum, invoice) => sum + actualProfit(invoice), 0) / 10_000_000,
+     };
+   });
+ 
+@@ -202,22 +203,22 @@ export function buildDashboardSnapshot(
+     .map((price) => new Date(price.capturedAt))
+     .sort((left, right) => right.getTime() - left.getTime())[0];
+   const quote = (price: MarketPrice | undefined, side: "buy" | "sell") =>
+-    price ? formatRials(side === "buy" ? price.buyPriceRials : price.sellPriceRials) : "ثبت نشده";
++    price ? formatMoney(side === "buy" ? price.buyPriceRials : price.sellPriceRials) : "ثبت نشده";
+ 
+   return {
+     profile,
+     quickOperations: [
+       { id: "new-invoice", title: "فاکتور جدید", description: "ساخت سفارش، تسویه و صدور فاکتور رسمی.", meta: "شروع عملیات", path: "/orders/new" },
+-      { id: "new-customer", title: "مشتری جدید", description: "ثبت امن مشتری و اطلاعات تماس او.", meta: `${rialFormatter.format(data.customers.length)} مشتری`, path: "/customers?new=1" },
+-      { id: "new-product", title: "کالای جدید", description: "ثبت محصول، مدل طلا و مشخصات قیمت‌گذاری.", meta: `${rialFormatter.format(data.products.length)} محصول`, path: "/products?new=1" },
+-      { id: "inventory-receipt", title: "خرید از تأمین‌کننده", description: "ثبت تعداد، قیمت خرید و قیمت فروش دستی.", meta: `${rialFormatter.format(inventoryAvailable)} آماده فروش`, path: "/suppliers?purchase=1" },
+-      { id: "settlement", title: "تسویه سفارش", description: "ثبت پرداخت و صدور خودکار فاکتور.", meta: `${rialFormatter.format(pendingOrders.length)} در انتظار`, path: "/orders?settle=1" },
+-      { id: "daily-report", title: "گزارش روز", description: "مرور فروش، سود و وضعیت عملیات امروز.", meta: formatRials(salesToday), path: "/reports" },
++      { id: "new-customer", title: "مشتری جدید", description: "ثبت امن مشتری و اطلاعات تماس او.", meta: `${numberFormatter.format(data.customers.length)} مشتری`, path: "/customers?new=1" },
++      { id: "new-product", title: "کالای جدید", description: "ثبت محصول، مدل طلا و مشخصات قیمت‌گذاری.", meta: `${numberFormatter.format(data.products.length)} محصول`, path: "/products?new=1" },
++      { id: "inventory-receipt", title: "خرید از تأمین‌کننده", description: "ثبت تعداد، قیمت خرید و قیمت فروش دستی.", meta: `${numberFormatter.format(inventoryAvailable)} آماده فروش`, path: "/suppliers?purchase=1" },
++      { id: "settlement", title: "تسویه سفارش", description: "ثبت پرداخت و صدور خودکار فاکتور.", meta: `${numberFormatter.format(pendingOrders.length)} در انتظار`, path: "/orders?settle=1" },
++      { id: "daily-report", title: "گزارش روز", description: "مرور فروش، سود و وضعیت عملیات امروز.", meta: formatMoney(salesToday), path: "/reports" },
+     ],
+     metrics,
+     market: {
+       updatedAt: latestMarketDate
+-        ? new Intl.DateTimeFormat("fa-IR", { hour: "2-digit", minute: "2-digit" }).format(latestMarketDate)
++        ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(latestMarketDate)
+         : "نرخی ثبت نشده",
+       goldPrices: [
+         { label: "طلای ۱۸ عیار", value: quote(gold18, "sell") },
+@@ -241,15 +242,15 @@ export function buildDashboardSnapshot(
+     transactions: data.invoices.slice(0, 5).map((invoice) => ({
+       id: invoice.id,
+       customer: invoice.customerNameSnapshot || "مشتری ثبت‌شده",
+-      detail: `${new Intl.DateTimeFormat("fa-IR", { hour: "2-digit", minute: "2-digit" }).format(new Date(invoice.issuedAt))} · فاکتور ${invoice.invoiceNumber}`,
+-      amount: `+${formatRials(invoice.grandTotalRials)}`,
++      detail: `${new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(new Date(invoice.issuedAt))} · فاکتور ${invoice.invoiceNumber}`,
++      amount: `+${formatMoney(invoice.grandTotalRials)}`,
+       positive: invoice.status !== "Voided",
+     })),
+     upcomingPayments: pendingOrders.slice(0, 4).map((order) => ({
+       id: order.id,
+       title: `سفارش ${order.orderNumber} · ${order.customerNameSnapshot || "مشتری"}`,
+       dueDate: "در انتظار تسویه",
+-      amount: formatRials(order.grandTotalRials),
++      amount: formatMoney(order.grandTotalRials),
+     })),
+   };
+ }
+diff --git a/GoldInvoice.Client/src/features/invoices/invoiceDocument.ts b/GoldInvoice.Client/src/features/invoices/invoiceDocument.ts
+index 4c37bd95b09e77316ab5a7ec7015f1665d41d16b..08d8370039c6af96613bcdbcf7fe29d8c53833ad 100644
+--- a/GoldInvoice.Client/src/features/invoices/invoiceDocument.ts
++++ b/GoldInvoice.Client/src/features/invoices/invoiceDocument.ts
+@@ -1,14 +1,5 @@
+ import type { Invoice } from "../operations/operations.types";
+-
+-const rialFormatter = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 0 });
+-const decimalFormatter = new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 3 });
+-const dateFormatter = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+-  year: "numeric",
+-  month: "2-digit",
+-  day: "2-digit",
+-  hour: "2-digit",
+-  minute: "2-digit",
+-});
++import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
+ 
+ function escapeHtml(value: unknown): string {
+   return String(value ?? "")
+@@ -19,28 +10,32 @@ function escapeHtml(value: unknown): string {
+     .replaceAll("'", "&#039;");
+ }
+ 
+-function rials(value: number): string {
+-  return `${rialFormatter.format(value)} ریال`;
++function money(valueInRials: number): string {
++  return formatTomansFromRials(valueInRials);
+ }
+ 
+ function optional(value?: string | null): string {
+   return value?.trim() ? escapeHtml(value) : "—";
+ }
+ 
+-function invoiceRows(invoice: Invoice): string {
++function invoiceRows(
++  invoice: Invoice,
++  integerFormatter: Intl.NumberFormat,
++  decimalFormatter: Intl.NumberFormat,
++): string {
+   return invoice.items.map((item, index) => `
+     <tr>
+-      <td>${rialFormatter.format(index + 1)}</td>
++      <td>${integerFormatter.format(index + 1)}</td>
+       <td class="description-cell">
+         <strong>${escapeHtml(item.productName)}</strong>
+         <span>${escapeHtml(item.variantName)}</span>
+       </td>
+       <td class="ltr">${escapeHtml(item.sku)}</td>
+-      <td>${item.karat ? rialFormatter.format(item.karat) : "—"}</td>
++      <td>${item.karat ? integerFormatter.format(item.karat) : "—"}</td>
+       <td>${item.grossWeightGrams ? decimalFormatter.format(item.grossWeightGrams) : "—"}</td>
+-      <td>${rialFormatter.format(item.quantity)}</td>
+-      <td>${rials(item.unitPriceRials)}</td>
+-      <td><strong>${rials(item.lineTotalRials)}</strong></td>
++      <td>${integerFormatter.format(item.quantity)}</td>
++      <td>${money(item.unitPriceRials)}</td>
++      <td><strong>${money(item.lineTotalRials)}</strong></td>
+     </tr>
+   `).join("");
+ }
+@@ -50,19 +45,93 @@ export function invoiceFileName(invoice: Invoice): string {
+ }
+ 
+ export function buildInvoiceDocumentHtml(invoice: Invoice): string {
++  const english = activeNumberLocale() === "en-US";
++  const locale = english ? "en-US" : "fa-IR";
++  const integerFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
++  const decimalFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 3 });
++  const dateFormatter = new Intl.DateTimeFormat(english ? "en-US" : "fa-IR-u-ca-persian", {
++    year: "numeric",
++    month: "2-digit",
++    day: "2-digit",
++    hour: "2-digit",
++    minute: "2-digit",
++  });
++  const copy = english ? {
++    invoice: "Sales invoice",
++    voided: "Voided",
++    paid: "Paid",
++    gallery: "Vendome Gallery",
++    buyer: "Buyer information",
++    customerName: "Customer name",
++    phone: "Phone",
++    nationalId: "National ID",
++    address: "Address",
++    postalCode: "Postal code",
++    seller: "Seller and document information",
++    store: "Store",
++    issueDate: "Issue date",
++    orderNumber: "Order number",
++    economicId: "Economic ID",
++    items: "Invoice items",
++    row: "#",
++    description: "Description",
++    sku: "SKU",
++    karat: "Karat",
++    weight: "Weight (g)",
++    quantity: "Quantity",
++    unitPrice: "Unit price",
++    amount: "Amount",
++    paymentStatus: "Payment status: Verified",
++    paymentNote: "This invoice was issued after final payment verification. Changes to printable details are recorded with a reason in the audit trail.",
++    subtotal: "Items subtotal",
++    discount: "Discount",
++    shipping: "Shipping",
++    total: "Final total",
++  } : {
++    invoice: "فاکتور فروش",
++    voided: "باطل‌شده",
++    paid: "پرداخت‌شده",
++    gallery: "گالری وندوم",
++    buyer: "اطلاعات خریدار",
++    customerName: "نام مشتری",
++    phone: "تلفن",
++    nationalId: "شناسه ملی",
++    address: "نشانی",
++    postalCode: "کد پستی",
++    seller: "اطلاعات فروشنده و سند",
++    store: "فروشگاه",
++    issueDate: "تاریخ صدور",
++    orderNumber: "شماره سفارش",
++    economicId: "شناسه اقتصادی",
++    items: "اقلام فاکتور",
++    row: "ردیف",
++    description: "شرح کالا",
++    sku: "کد کالا",
++    karat: "عیار",
++    weight: "وزن (گرم)",
++    quantity: "تعداد",
++    unitPrice: "قیمت واحد",
++    amount: "مبلغ",
++    paymentStatus: "وضعیت پرداخت: تأییدشده",
++    paymentNote: "این فاکتور پس از تأیید نهایی پرداخت صادر شده است. هر اصلاح اطلاعات چاپی با دلیل و سابقه در سامانه ثبت می‌شود.",
++    subtotal: "جمع اقلام",
++    discount: "تخفیف",
++    shipping: "هزینه ارسال",
++    total: "مبلغ نهایی",
++  };
+   const address = invoice.address;
+   const store = invoice.store;
+-  const statusLabel = invoice.status === "Voided" ? "باطل‌شده" : "پرداخت‌شده";
++  const statusLabel = invoice.status === "Voided" ? copy.voided : copy.paid;
+   const addressText = address
+-    ? `${escapeHtml(address.province)}، ${escapeHtml(address.city)}، ${escapeHtml(address.addressLine)}`
++    ? `${escapeHtml(address.province)}${english ? ", " : "، "}${escapeHtml(address.city)}${english ? ", " : "، "}${escapeHtml(address.addressLine)}`
+     : "—";
+ 
+   return `<!doctype html>
+-<html lang="fa" dir="rtl">
++<html lang="${english ? "en" : "fa"}" dir="${english ? "ltr" : "rtl"}">
+ <head>
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width,initial-scale=1" />
+-  <title>فاکتور ${escapeHtml(invoice.invoiceNumber)}</title>
++  <title>${copy.invoice} ${escapeHtml(invoice.invoiceNumber)}</title>
+   <style>
+     @page { size: A4 portrait; margin: 0; }
+     * { box-sizing: border-box; }
+@@ -76,7 +145,7 @@ export function buildInvoiceDocumentHtml(invoice: Invoice): string {
+     .brand-mark { display: grid; width: 17mm; height: 17mm; place-items: center; color: #142844; border: 1.2mm solid #c7a971; border-radius: 50%; font-family: Georgia, serif; font-size: 20px; }
+     .brand h1 { margin: 0; color: #142844; font-family: Georgia, serif; font-size: 21px; letter-spacing: .12em; }
+     .brand p { margin: 1.5mm 0 0; color: #748094; font-size: 10px; }
+-    .invoice-heading { text-align: left; }
++    .invoice-heading { text-align: ${english ? "right" : "left"}; }
+     .invoice-heading h2 { margin: 0; font-size: 20px; font-weight: 800; }
+     .invoice-heading .number { display: block; margin-top: 1.5mm; color: #9a7740; font-size: 12px; font-weight: 700; direction: ltr; }
+     .status { display: inline-block; margin-top: 2.5mm; padding: 1.4mm 3mm; color: ${invoice.status === "Voided" ? "#922c2c" : "#27644b"}; background: ${invoice.status === "Voided" ? "#fbeaea" : "#e9f5ef"}; border-radius: 20px; font-size: 9px; }
+@@ -99,12 +168,12 @@ export function buildInvoiceDocumentHtml(invoice: Invoice): string {
+     th:nth-child(5), td:nth-child(5) { width: 18mm; }
+     th:nth-child(6), td:nth-child(6) { width: 13mm; }
+     th:nth-child(7), td:nth-child(7), th:nth-child(8), td:nth-child(8) { width: 29mm; }
+-    .description-cell { text-align: right; }
++    .description-cell { text-align: ${english ? "left" : "right"}; }
+     .description-cell strong, .description-cell span { display: block; }
+     .description-cell span { margin-top: 1mm; color: #7b8594; font-size: 8px; }
+     .ltr { direction: ltr; }
+     .summary-wrap { display: flex; align-items: flex-start; justify-content: space-between; margin-top: 7mm; gap: 8mm; }
+-    .payment-note { flex: 1; padding: 4mm; color: #596579; background: #fbf8f2; border-right: 1.2mm solid #c7a971; line-height: 1.9; }
++    .payment-note { flex: 1; padding: 4mm; color: #596579; background: #fbf8f2; ${english ? "border-left" : "border-right"}: 1.2mm solid #c7a971; line-height: 1.9; }
+     .payment-note strong { display: block; color: #17263d; }
+     .totals { width: 70mm; }
+     .total-row { display: flex; justify-content: space-between; padding: 2.2mm 0; border-bottom: 1px solid #e3e6eb; }
+@@ -121,14 +190,14 @@ export function buildInvoiceDocumentHtml(invoice: Invoice): string {
+ </head>
+ <body>
+   <main class="page">
+-    ${invoice.status === "Voided" ? '<div class="void-watermark">باطل‌شده</div>' : ""}
++    ${invoice.status === "Voided" ? `<div class="void-watermark">${copy.voided}</div>` : ""}
+     <header class="header">
+       <div class="brand">
+         <div class="brand-mark">V</div>
+-        <div><h1>VENDOME</h1><p>${optional(store?.tradeName || "گالری وندوم")}</p></div>
++        <div><h1>VENDOME</h1><p>${optional(store?.tradeName || copy.gallery)}</p></div>
+       </div>
+       <div class="invoice-heading">
+-        <h2>فاکتور فروش</h2>
++        <h2>${copy.invoice}</h2>
+         <span class="number">${escapeHtml(invoice.invoiceNumber)}</span>
+         <span class="status">${statusLabel}</span>
+       </div>
+@@ -136,38 +205,38 @@ export function buildInvoiceDocumentHtml(invoice: Invoice): string {
+ 
+     <section class="meta-grid">
+       <div class="info-box">
+-        <h3>اطلاعات خریدار</h3>
+-        <div class="info-row"><span>نام مشتری</span><strong>${optional(invoice.customerNameSnapshot)}</strong></div>
+-        <div class="info-row"><span>شماره تلفن</span><strong class="ltr">${optional(address?.phoneNumber)}</strong></div>
+-        <div class="info-row"><span>شناسه ملی</span><strong class="ltr">${optional(invoice.customerNationalIdSnapshot)}</strong></div>
+-        <div class="info-row"><span>نشانی</span><strong>${addressText}</strong></div>
+-        <div class="info-row"><span>کد پستی</span><strong class="ltr">${optional(address?.postalCode)}</strong></div>
++        <h3>${copy.buyer}</h3>
++        <div class="info-row"><span>${copy.customerName}</span><strong>${optional(invoice.customerNameSnapshot)}</strong></div>
++        <div class="info-row"><span>${copy.phone}</span><strong class="ltr">${optional(address?.phoneNumber)}</strong></div>
++        <div class="info-row"><span>${copy.nationalId}</span><strong class="ltr">${optional(invoice.customerNationalIdSnapshot)}</strong></div>
++        <div class="info-row"><span>${copy.address}</span><strong>${addressText}</strong></div>
++        <div class="info-row"><span>${copy.postalCode}</span><strong class="ltr">${optional(address?.postalCode)}</strong></div>
+       </div>
+       <div class="info-box">
+-        <h3>اطلاعات فروشنده و سند</h3>
+-        <div class="info-row"><span>فروشگاه</span><strong>${optional(store?.legalName || store?.tradeName)}</strong></div>
+-        <div class="info-row"><span>تلفن</span><strong class="ltr">${optional(store?.phoneNumber)}</strong></div>
+-        <div class="info-row"><span>تاریخ صدور</span><strong>${escapeHtml(dateFormatter.format(new Date(invoice.issuedAt)))}</strong></div>
+-        <div class="info-row"><span>شماره سفارش</span><strong class="ltr">${escapeHtml(invoice.orderId.slice(0, 8).toUpperCase())}</strong></div>
+-        <div class="info-row"><span>شناسه اقتصادی</span><strong class="ltr">${optional(store?.economicCode)}</strong></div>
++        <h3>${copy.seller}</h3>
++        <div class="info-row"><span>${copy.store}</span><strong>${optional(store?.legalName || store?.tradeName)}</strong></div>
++        <div class="info-row"><span>${copy.phone}</span><strong class="ltr">${optional(store?.phoneNumber)}</strong></div>
++        <div class="info-row"><span>${copy.issueDate}</span><strong>${escapeHtml(dateFormatter.format(new Date(invoice.issuedAt)))}</strong></div>
++        <div class="info-row"><span>${copy.orderNumber}</span><strong class="ltr">${escapeHtml(invoice.orderId.slice(0, 8).toUpperCase())}</strong></div>
++        <div class="info-row"><span>${copy.economicId}</span><strong class="ltr">${optional(store?.economicCode)}</strong></div>
+       </div>
+     </section>
+ 
+-    <table aria-label="اقلام فاکتور">
+-      <thead><tr><th>ردیف</th><th>شرح کالا</th><th>کد کالا</th><th>عیار</th><th>وزن (گرم)</th><th>تعداد</th><th>قیمت واحد</th><th>مبلغ</th></tr></thead>
+-      <tbody>${invoiceRows(invoice)}</tbody>
++    <table aria-label="${copy.items}">
++      <thead><tr><th>${copy.row}</th><th>${copy.description}</th><th>${copy.sku}</th><th>${copy.karat}</th><th>${copy.weight}</th><th>${copy.quantity}</th><th>${copy.unitPrice}</th><th>${copy.amount}</th></tr></thead>
++      <tbody>${invoiceRows(invoice, integerFormatter, decimalFormatter)}</tbody>
+     </table>
+ 
+     <section class="summary-wrap">
+       <div class="payment-note">
+-        <strong>وضعیت پرداخت: تأییدشده</strong>
+-        این فاکتور پس از تأیید نهایی پرداخت صادر شده است. هر اصلاح اطلاعات چاپی با دلیل و سابقه در سامانه ثبت می‌شود.
++        <strong>${copy.paymentStatus}</strong>
++        ${copy.paymentNote}
+       </div>
+       <div class="totals">
+-        <div class="total-row"><span>جمع اقلام</span><strong>${rials(invoice.subtotalRials)}</strong></div>
+-        <div class="total-row"><span>تخفیف</span><strong>${rials(invoice.discountRials)}</strong></div>
+-        <div class="total-row"><span>هزینه ارسال</span><strong>${rials(invoice.shippingRials)}</strong></div>
+-        <div class="total-row grand"><span>مبلغ نهایی</span><strong>${rials(invoice.grandTotalRials)}</strong></div>
++        <div class="total-row"><span>${copy.subtotal}</span><strong>${money(invoice.subtotalRials)}</strong></div>
++        <div class="total-row"><span>${copy.discount}</span><strong>${money(invoice.discountRials)}</strong></div>
++        <div class="total-row"><span>${copy.shipping}</span><strong>${money(invoice.shippingRials)}</strong></div>
++        <div class="total-row grand"><span>${copy.total}</span><strong>${money(invoice.grandTotalRials)}</strong></div>
+       </div>
+     </section>
+ 
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index 3394e675443c41d729d22174f888da58838bf3cc..1e67a6a53abe9dbc1b2e74552fd770cdf822e2fe 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -38,14 +38,16 @@ import {
+ import { useAuthentication } from "../auth/AuthContext";
+ import { buildInvoiceDocumentHtml, invoiceFileName } from "../invoices/invoiceDocument";
+ import { DesktopBridgeError, isDesktopHost, sendDesktopCommand } from "../../platform/desktopBridge";
++import { tomansToRials } from "../../lib/money";
+ import { createIdempotencyKey, OperationalApiError } from "./operationsApi";
+ import { useOperations } from "./OperationsContext";
++import { SupplierPurchasesPage } from "./SupplierPurchasesPage";
+ import {
+   EmptyState,
+   FormActions,
+   FormField,
+   formatDate,
+-  formatRials,
++  formatMoney,
+   InlineError,
+   LoadingState,
+   MetricTile,
+@@ -317,7 +319,7 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+       <div className="module-metrics-grid">
+         <MetricTile label="کل فاکتورها" value={String(data.invoices.length)} hint="رکورد دیتابیس" />
+         <MetricTile label="فاکتور معتبر" value={String(active.length)} hint="غیرباطل" />
+-        <MetricTile label="مبلغ کل" value={formatRials(total)} hint="همه دوره‌ها" />
++        <MetricTile label="مبلغ کل" value={formatMoney(total)} hint="همه دوره‌ها" />
+       </div>
+       {data.invoices.length ? (
+         <TableCard>
+@@ -329,7 +331,7 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+                   <td className="numeric-cell">{invoice.invoiceNumber}</td>
+                   <td>{invoice.customerNameSnapshot || "مشتری ثبت‌شده"}</td>
+                   <td>{formatDate(invoice.issuedAt)}</td>
+-                  <td>{formatRials(invoice.grandTotalRials)}</td>
++                  <td>{formatMoney(invoice.grandTotalRials)}</td>
+                   <td><StatusBadge status={invoice.status} /></td>
+                   <td><div className="icon-action-group">
+                     <button className="icon-action icon-action--gold" type="button" title="مشاهده فاکتور" aria-label={`مشاهده فاکتور ${invoice.invoiceNumber}`} onClick={() => setSelected(invoice)}><Eye size={16} /></button>
+@@ -706,7 +708,7 @@ function ProductsPage({ path, onNavigate, onNotice }: RouteProps) {
+   };
+   const submitVariant = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault(); if (!variantProduct) return; const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null });
+-    try { const variant = await request<ProductVariant>(`/api/v1/catalog/products/${variantProduct.id}/variants`, { method: "POST", body: JSON.stringify({ sku: textValue(form, "sku"), name: textValue(form, "name"), goldDetail: { karat: numberValue(form, "karat"), grossWeight: numberValue(form, "grossWeight"), netGoldWeight: numberValue(form, "netGoldWeight"), stoneWeight: numberValue(form, "stoneWeight"), otherMaterialWeight: numberValue(form, "otherMaterialWeight"), manufacturingWageType: "FixedRials", manufacturingWageValue: 0, profitPercentage: 0, taxPercentage: 0, hasStone: form.get("hasStone") === "on", isWeightVariable: form.get("isWeightVariable") === "on" } }) }); await request("/api/v1/pricing/rules", { method: "POST", body: JSON.stringify({ productVariantId: variant.id, pricingMethod: "FixedPrice", goldMarketPriceType: null, fixedPriceRials: numberValue(form, "fixedPriceRials"), fixedGoldPricePerGramRials: null, wageType: "FixedRials", wageValue: 0, profitPercentage: 0, taxPercentage: 0, effectiveFrom: new Date().toISOString(), effectiveTo: null }) }); onNotice("مدل محصول و قیمت فروش آن ثبت شد."); setFormState(initialFormState); setVariantProduct(null); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); }
++    try { const variant = await request<ProductVariant>(`/api/v1/catalog/products/${variantProduct.id}/variants`, { method: "POST", body: JSON.stringify({ sku: textValue(form, "sku"), name: textValue(form, "name"), goldDetail: { karat: numberValue(form, "karat"), grossWeight: numberValue(form, "grossWeight"), netGoldWeight: numberValue(form, "netGoldWeight"), stoneWeight: numberValue(form, "stoneWeight"), otherMaterialWeight: numberValue(form, "otherMaterialWeight"), manufacturingWageType: "FixedRials", manufacturingWageValue: 0, profitPercentage: 0, taxPercentage: 0, hasStone: form.get("hasStone") === "on", isWeightVariable: form.get("isWeightVariable") === "on" } }) }); await request("/api/v1/pricing/rules", { method: "POST", body: JSON.stringify({ productVariantId: variant.id, pricingMethod: "FixedPrice", goldMarketPriceType: null, fixedPriceRials: tomansToRials(numberValue(form, "fixedPriceTomans")), fixedGoldPricePerGramRials: null, wageType: "FixedRials", wageValue: 0, profitPercentage: 0, taxPercentage: 0, effectiveFrom: new Date().toISOString(), effectiveTo: null }) }); onNotice("مدل محصول و قیمت فروش آن ثبت شد."); setFormState(initialFormState); setVariantProduct(null); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); }
+   };
+   return <ModuleBody><PageHeader icon={Gem} title="محصولات" description="کاتالوگ، مدل‌ها، کد کالا و مشخصات تخصصی طلا." actionLabel="محصول جدید" onAction={() => { setFormState(initialFormState); setCreateOpen(true); }} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice />
+     <div className="module-metrics-grid"><MetricTile label="محصول" value={String(data.products.length)} hint="کالای اصلی" /><MetricTile label="مدل کالا" value={String(data.products.reduce((sum, item) => sum + item.variants.length, 0))} hint="SKU ثبت‌شده" /><MetricTile label="دسته‌بندی" value={String(data.categories.length)} hint="ساختار کاتالوگ" /></div>
+@@ -714,7 +716,7 @@ function ProductsPage({ path, onNavigate, onNotice }: RouteProps) {
+     {filteredProducts.length ? <div className="card-grid">{filteredProducts.map((product) => <article className="lux-card entity-card product-card" key={product.id}><ProductPhoto product={product} /><header><div><small>{data.categories.find((item) => item.id === product.productCategoryId)?.name || "بدون دسته"}</small><h3>{product.name}</h3></div><StatusBadge status={product.isActive ? "Active" : "Inactive"} /></header><p>{product.description || "توضیحی ثبت نشده است."}</p><div className="chip-list">{product.variants.map((variant) => <span key={variant.id}>{variant.sku} · {variant.name}</span>)}{!product.variants.length && <span>هنوز مدلی ندارد</span>}</div><div className="entity-card-actions"><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setVariantProduct(product); }}><PackagePlus size={15} /> افزودن مدل</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setImageProduct(product); }}><ImagePlus size={15} /> {product.images.length ? "تغییر تصویر" : "افزودن تصویر"}</button></div></article>)}</div> : <EmptyState title="محصولی یافت نشد" description="محصول و تصویر آن را ثبت کن تا در انبار و سفارش قابل استفاده باشد." />}
+     <Modal open={createOpen} title="ثبت محصول" description="تصویر JPG، PNG یا WebP تا ۵ مگابایت الزامی است." onClose={closeCreate}><form className="entity-form" onSubmit={submitProduct}><FormField label="نام محصول"><input name="name" required /></FormField><FormField label="شناسه لاتین" hint="مثلاً gold-ring-001"><input name="slug" dir="ltr" required /></FormField><FormField label="دسته‌بندی"><select name="categoryId"><option value="">بدون دسته</option>{data.categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField><FormField label="تصویر محصول" wide><input name="image" type="file" accept="image/jpeg,image/png,image/webp" required /></FormField><FormField label="توضیحات" wide><textarea name="description" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت محصول و تصویر" onCancel={closeCreate} /></form></Modal>
+     <Modal open={Boolean(imageProduct)} title={`تصویر ${imageProduct?.name || "محصول"}`} onClose={() => { setImageProduct(null); setFormState(initialFormState); }}><form className="entity-form" onSubmit={submitImage}><FormField label="فایل تصویر" wide><input name="image" type="file" accept="image/jpeg,image/png,image/webp" required /></FormField><FormField label="متن جایگزین" wide><input name="altText" defaultValue={imageProduct?.name || ""} /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ذخیره تصویر" onCancel={() => { setImageProduct(null); setFormState(initialFormState); }} /></form></Modal>
+-    <Modal open={Boolean(variantProduct)} title={`مدل جدید برای ${variantProduct?.name || "محصول"}`} onClose={() => { setFormState(initialFormState); setVariantProduct(null); }}><form className="entity-form" onSubmit={submitVariant}><FormField label="کد کالا (SKU)"><input name="sku" dir="ltr" required /></FormField><FormField label="نام مدل"><input name="name" required /></FormField><FormField label="عیار"><select name="karat" defaultValue="18">{[9,10,14,18,21,22,24].map((value) => <option key={value}>{value}</option>)}</select></FormField><FormField label="قیمت ثابت فروش (ریال)"><input name="fixedPriceRials" type="number" min="1" step="1" required /></FormField><FormField label="وزن کل (گرم)"><input name="grossWeight" type="number" min="0.001" step="0.001" required /></FormField><FormField label="وزن خالص طلا"><input name="netGoldWeight" type="number" min="0.001" step="0.001" required /></FormField><FormField label="وزن نگین"><input name="stoneWeight" type="number" min="0" step="0.001" defaultValue="0" /></FormField><FormField label="وزن سایر مواد"><input name="otherMaterialWeight" type="number" min="0" step="0.001" defaultValue="0" /></FormField><label className="check-field"><input name="hasStone" type="checkbox" /> دارای نگین</label><label className="check-field"><input name="isWeightVariable" type="checkbox" /> وزن متغیر</label><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت مدل و قیمت" onCancel={() => { setFormState(initialFormState); setVariantProduct(null); }} /></form></Modal>
++    <Modal open={Boolean(variantProduct)} title={`مدل جدید برای ${variantProduct?.name || "محصول"}`} onClose={() => { setFormState(initialFormState); setVariantProduct(null); }}><form className="entity-form" onSubmit={submitVariant}><FormField label="کد کالا (SKU)"><input name="sku" dir="ltr" required /></FormField><FormField label="نام مدل"><input name="name" required /></FormField><FormField label="عیار"><select name="karat" defaultValue="18">{[9,10,14,18,21,22,24].map((value) => <option key={value}>{value}</option>)}</select></FormField><FormField label="قیمت ثابت فروش (تومان)"><input name="fixedPriceTomans" type="number" min="1" step="1" required /></FormField><FormField label="وزن کل (گرم)"><input name="grossWeight" type="number" min="0.001" step="0.001" required /></FormField><FormField label="وزن خالص طلا"><input name="netGoldWeight" type="number" min="0.001" step="0.001" required /></FormField><FormField label="وزن نگین"><input name="stoneWeight" type="number" min="0" step="0.001" defaultValue="0" /></FormField><FormField label="وزن سایر مواد"><input name="otherMaterialWeight" type="number" min="0" step="0.001" defaultValue="0" /></FormField><label className="check-field"><input name="hasStone" type="checkbox" /> دارای نگین</label><label className="check-field"><input name="isWeightVariable" type="checkbox" /> وزن متغیر</label><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت مدل و قیمت" onCancel={() => { setFormState(initialFormState); setVariantProduct(null); }} /></form></Modal>
+   </ModuleBody>;
+ }
+ 
+@@ -729,7 +731,7 @@ function InventoryPage({ path, onNavigate, onNotice }: RouteProps) {
+   const submitReceipt = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request("/api/v1/inventory/receipts", { method: "POST", body: JSON.stringify({ warehouseId: textValue(form, "warehouseId"), productVariantId: textValue(form, "variantId"), quantity: numberValue(form, "quantity"), referenceType: "DesktopReceipt", reason: optionalText(form, "reason") }) }); onNotice("رسید انبار ثبت و موجودی به‌روزرسانی شد."); closeReceipt(); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+   return <ModuleBody><PageHeader icon={Boxes} title="انبار" description="موجودی واقعی هر انبار، رزرو، قیمت خرید میانگین و مقدار قابل فروش." actionLabel="موجودی اولیه / اصلاح" onAction={() => { setFormState(initialFormState); setReceiptOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/suppliers?purchase=1")}>خرید از تأمین‌کننده</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setWarehouseOpen(true); }}>انبار جدید</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />
+     <div className="module-metrics-grid"><MetricTile label="انبار فعال" value={String(data.warehouses.filter((item) => item.isActive).length)} hint="محل نگهداری" /><MetricTile label="موجودی کل" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0))} hint="قطعه" /><MetricTile label="قابل فروش" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="پس از رزرو" /></div>
+-    {data.inventoryItems.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>انبار</th><th>محصول / مدل</th><th>موجودی</th><th>رزرو</th><th>قابل فروش</th><th>میانگین قیمت خرید</th></tr></thead><tbody>{data.inventoryItems.map((item) => { const variant = variants.find((value) => value.id === item.productVariantId); return <tr key={item.id}><td>{data.warehouses.find((value) => value.id === item.warehouseId)?.name || "—"}</td><td>{variant ? `${variant.productName} · ${variant.name}` : item.productVariantId}<small>{variant?.sku}</small></td><td>{item.quantityOnHand}</td><td>{item.quantityReserved}</td><td><strong>{item.quantityAvailable}</strong></td><td>{item.hasAcquisitionCost ? formatRials(item.averageUnitCostRials) : <span className="muted-text">ثبت نشده</span>}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="موجودی ثبت نشده" description="ابتدا انبار و مدل محصول را بساز، سپس خرید را از صفحه تأمین‌کنندگان ثبت کن." />}
++    {data.inventoryItems.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>انبار</th><th>محصول / مدل</th><th>موجودی</th><th>رزرو</th><th>قابل فروش</th><th>میانگین قیمت خرید</th></tr></thead><tbody>{data.inventoryItems.map((item) => { const variant = variants.find((value) => value.id === item.productVariantId); return <tr key={item.id}><td>{data.warehouses.find((value) => value.id === item.warehouseId)?.name || "—"}</td><td>{variant ? `${variant.productName} · ${variant.name}` : item.productVariantId}<small>{variant?.sku}</small></td><td>{item.quantityOnHand}</td><td>{item.quantityReserved}</td><td><strong>{item.quantityAvailable}</strong></td><td>{item.hasAcquisitionCost ? formatMoney(item.averageUnitCostRials) : <span className="muted-text">ثبت نشده</span>}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="موجودی ثبت نشده" description="ابتدا انبار و مدل محصول را بساز، سپس خرید را از صفحه تأمین‌کنندگان ثبت کن." />}
+     <Modal open={warehouseOpen} title="ساخت انبار" onClose={() => { setFormState(initialFormState); setWarehouseOpen(false); }}><form className="entity-form" onSubmit={submitWarehouse}><FormField label="کد انبار"><input name="code" dir="ltr" required /></FormField><FormField label="نام انبار"><input name="name" required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت انبار" onCancel={() => { setFormState(initialFormState); setWarehouseOpen(false); }} /></form></Modal>
+     <Modal open={receiptOpen} title="موجودی اولیه / اصلاح" description="این فرم قیمت خرید ندارد و فقط برای ورود اولیه یا اصلاح فنی است. خرید واقعی را از صفحه تأمین‌کنندگان ثبت کن." onClose={closeReceipt}><form className="entity-form" onSubmit={submitReceipt}><FormField label="انبار"><select name="warehouseId" required><option value="">انتخاب کن</option>{data.warehouses.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField><FormField label="مدل کالا"><select name="variantId" required><option value="">انتخاب کن</option>{variants.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.productName} · {item.name} ({item.sku})</option>)}</select></FormField><FormField label="تعداد"><input name="quantity" type="number" min="1" defaultValue="1" required /></FormField><FormField label="علت اصلاح"><input name="reason" placeholder="موجودی اولیه / اصلاح شمارش" required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت موجودی" onCancel={closeReceipt} /></form></Modal>
+   </ModuleBody>;
+@@ -746,9 +748,9 @@ function OrdersPage(props: RouteProps) {
+   const closeSettlement = () => { setFormState(initialFormState); setSettleOrder(null); if (queryFlag(props.path, "settle")) props.onNavigate("/orders"); };
+   const submitPayment = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!settleOrder) return; const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { const payment = await request<Payment>("/api/v1/payments/manual", { method: "POST", headers: { "Idempotency-Key": createIdempotencyKey("manual-payment") }, body: JSON.stringify({ orderId: settleOrder.id, method: textValue(form, "method"), reference: optionalText(form, "reference") }) }); setSettleOrder(null); setFormState(initialFormState); await refresh(); if (payment.invoiceId) { props.onNotice("پرداخت تأیید و فاکتور صادر شد؛ پیش‌نمایش فاکتور باز شد."); props.onNavigate(`/invoices?open=${payment.invoiceId}`); } else { props.onNotice("پرداخت ثبت شد."); props.onNavigate("/orders"); } } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+   return <ModuleBody><PageHeader icon={ShoppingBag} title="سفارش‌ها" description="سفارش، رزرو موجودی، پرداخت و صدور فاکتور در یک گردش‌کار." actionLabel="سفارش جدید" onAction={() => props.onNavigate("/orders/new")} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice />
+-    <div className="module-metrics-grid"><MetricTile label="کل سفارش‌ها" value={String(data.orders.length)} hint="همه وضعیت‌ها" /><MetricTile label="در انتظار پرداخت" value={String(data.orders.filter((item) => ["Pending","AwaitingPayment","PaymentReview"].includes(item.status)).length)} hint="نیازمند اقدام" /><MetricTile label="فروش سفارش‌ها" value={formatRials(data.orders.filter((item) => item.status !== "Cancelled").reduce((sum, item) => sum + item.grandTotalRials, 0))} hint="غیرلغوشده" /></div>
+-    {data.orders.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شماره</th><th>مشتری</th><th>اقلام</th><th>مبلغ</th><th>وضعیت</th><th /></tr></thead><tbody>{data.orders.map((order) => <tr key={order.id}><td>{order.orderNumber}</td><td>{order.customerNameSnapshot || "مشتری"}</td><td>{order.items.length}</td><td>{formatRials(order.grandTotalRials)}</td><td><StatusBadge status={order.status} /></td><td>{!["Paid","Completed","Cancelled","Refunded"].includes(order.status) && <button className="row-action" type="button" onClick={() => { setFormState(initialFormState); setSettleOrder(order); }}>ثبت پرداخت</button>}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="سفارشی ثبت نشده" description="سفارش جدید، موجودی را رزرو می‌کند و بعد از تسویه فاکتور صادر می‌شود." />}
+-    <Modal open={Boolean(settleOrder)} title={`تسویه ${settleOrder?.orderNumber || "سفارش"}`} description={settleOrder ? `مبلغ قابل پرداخت: ${formatRials(settleOrder.grandTotalRials)}` : undefined} onClose={closeSettlement}><form className="entity-form" onSubmit={submitPayment}><FormField label="روش پرداخت"><select name="method"><option value="Cash">نقدی</option><option value="PointOfSale">کارت‌خوان</option><option value="BankTransfer">حواله بانکی</option><option value="CardToCard">کارت‌به‌کارت</option></select></FormField><FormField label="شماره پیگیری"><input name="reference" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت پرداخت و صدور فاکتور" onCancel={closeSettlement} /></form></Modal>
++    <div className="module-metrics-grid"><MetricTile label="کل سفارش‌ها" value={String(data.orders.length)} hint="همه وضعیت‌ها" /><MetricTile label="در انتظار پرداخت" value={String(data.orders.filter((item) => ["Pending","AwaitingPayment","PaymentReview"].includes(item.status)).length)} hint="نیازمند اقدام" /><MetricTile label="فروش سفارش‌ها" value={formatMoney(data.orders.filter((item) => item.status !== "Cancelled").reduce((sum, item) => sum + item.grandTotalRials, 0))} hint="غیرلغوشده" /></div>
++    {data.orders.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شماره</th><th>مشتری</th><th>اقلام</th><th>مبلغ</th><th>وضعیت</th><th /></tr></thead><tbody>{data.orders.map((order) => <tr key={order.id}><td>{order.orderNumber}</td><td>{order.customerNameSnapshot || "مشتری"}</td><td>{order.items.length}</td><td>{formatMoney(order.grandTotalRials)}</td><td><StatusBadge status={order.status} /></td><td>{!["Paid","Completed","Cancelled","Refunded"].includes(order.status) && <button className="row-action" type="button" onClick={() => { setFormState(initialFormState); setSettleOrder(order); }}>ثبت پرداخت</button>}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="سفارشی ثبت نشده" description="سفارش جدید، موجودی را رزرو می‌کند و بعد از تسویه فاکتور صادر می‌شود." />}
++    <Modal open={Boolean(settleOrder)} title={`تسویه ${settleOrder?.orderNumber || "سفارش"}`} description={settleOrder ? `مبلغ قابل پرداخت: ${formatMoney(settleOrder.grandTotalRials)}` : undefined} onClose={closeSettlement}><form className="entity-form" onSubmit={submitPayment}><FormField label="روش پرداخت"><select name="method"><option value="Cash">نقدی</option><option value="PointOfSale">کارت‌خوان</option><option value="BankTransfer">حواله بانکی</option><option value="CardToCard">کارت‌به‌کارت</option></select></FormField><FormField label="شماره پیگیری"><input name="reference" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت پرداخت و صدور فاکتور" onCancel={closeSettlement} /></form></Modal>
+   </ModuleBody>;
+ }
+ 
+@@ -817,8 +819,8 @@ function NewOrderPage({ path, onNavigate, onNotice }: RouteProps) {
+           customerNationalId: optionalText(form, "nationalId"),
+           lines: [{ inventoryItemId: inventoryItem.id, inventoryUnitId: null, quantity: numberValue(form, "quantity"), inventoryRowVersion: inventoryItem.rowVersion }],
+           reservationLifetimeMinutes: 15,
+-          discountRials: numberValue(form, "discount"),
+-          shippingRials: numberValue(form, "shipping"),
++          discountRials: tomansToRials(numberValue(form, "discount")),
++          shippingRials: tomansToRials(numberValue(form, "shipping")),
+         }),
+       });
+       await refresh();
+@@ -835,7 +837,7 @@ function NewOrderPage({ path, onNavigate, onNotice }: RouteProps) {
+   };
+   return <ModuleBody><PageHeader icon={ShoppingBag} title="سفارش و فاکتور جدید" description="ابتدا سفارش ساخته می‌شود؛ پس از ثبت پرداخت، فاکتور رسمی خودکار صادر خواهد شد." secondary={<button className="secondary-button" type="button" onClick={() => onNavigate("/orders")}>بازگشت</button>} />
+     {!data.storeProfile && <div className="setup-warning"><Settings size={20} /><div><strong>مشخصات فروشگاه هنوز کامل نشده است</strong><span>برای ثبت سفارش و Snapshot صحیح فاکتور، ابتدا مشخصات فروشگاه را ذخیره کن.</span></div><button className="secondary-button" type="button" onClick={() => onNavigate("/settings")}>رفتن به تنظیمات</button></div>}
+-    <section className="lux-card workflow-card"><div className="workflow-steps"><span className="is-active">۱ مشتری</span><span>۲ کالا و موجودی</span><span>۳ پرداخت</span><span>۴ فاکتور</span></div><form className="entity-form entity-form--page" onSubmit={submit}><FormField label="مشتری"><select value={customerId} onChange={(event) => setCustomerId(event.target.value)} required><option value="">انتخاب مشتری</option>{data.customers.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.displayName} · {item.phoneNumber || "بدون تلفن"}</option>)}</select></FormField><FormField label="نشانی"><select name="addressId" disabled={!customerId || loadingAddresses || Boolean(addressError)} required><option value="">{loadingAddresses ? "در حال دریافت…" : "انتخاب نشانی"}</option>{addresses.map((item) => <option value={item.id} key={item.id}>{item.title} · {item.city}</option>)}</select></FormField><FormField label="کد/شناسه ملی مشتری"><input name="nationalId" /></FormField><FormField label="موجودی کالا"><select name="inventoryItemId" required><option value="">انتخاب کالا</option>{data.inventoryItems.filter((item) => item.quantityAvailable > 0).map((item) => { const variant = variants.find((value) => value.id === item.productVariantId); return <option value={item.id} key={item.id}>{variant ? `${variant.productName} · ${variant.name}` : item.id} — موجودی {item.quantityAvailable}</option>; })}</select></FormField><FormField label="تعداد"><input name="quantity" type="number" min="1" defaultValue="1" required /></FormField><FormField label="تخفیف (ریال)"><input name="discount" type="number" min="0" defaultValue="0" /></FormField><FormField label="هزینه ارسال (ریال)"><input name="shipping" type="number" min="0" defaultValue="0" /></FormField>{addressError && <div className="inline-error form-field--wide">دریافت نشانی‌ها کامل نشد: {addressError}</div>}{customerId && !loadingAddresses && !addressError && !addresses.length && <div className="inline-help form-field--wide">این مشتری نشانی ندارد. از صفحه مشتریان برای او نشانی ثبت کن.</div>}<InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت سفارش" onCancel={() => onNavigate("/orders")} /></form></section>
++    <section className="lux-card workflow-card"><div className="workflow-steps"><span className="is-active">۱ مشتری</span><span>۲ کالا و موجودی</span><span>۳ پرداخت</span><span>۴ فاکتور</span></div><form className="entity-form entity-form--page" onSubmit={submit}><FormField label="مشتری"><select value={customerId} onChange={(event) => setCustomerId(event.target.value)} required><option value="">انتخاب مشتری</option>{data.customers.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.displayName} · {item.phoneNumber || "بدون تلفن"}</option>)}</select></FormField><FormField label="نشانی"><select name="addressId" disabled={!customerId || loadingAddresses || Boolean(addressError)} required><option value="">{loadingAddresses ? "در حال دریافت…" : "انتخاب نشانی"}</option>{addresses.map((item) => <option value={item.id} key={item.id}>{item.title} · {item.city}</option>)}</select></FormField><FormField label="کد/شناسه ملی مشتری"><input name="nationalId" /></FormField><FormField label="موجودی کالا"><select name="inventoryItemId" required><option value="">انتخاب کالا</option>{data.inventoryItems.filter((item) => item.quantityAvailable > 0).map((item) => { const variant = variants.find((value) => value.id === item.productVariantId); return <option value={item.id} key={item.id}>{variant ? `${variant.productName} · ${variant.name}` : item.id} — موجودی {item.quantityAvailable}</option>; })}</select></FormField><FormField label="تعداد"><input name="quantity" type="number" min="1" defaultValue="1" required /></FormField><FormField label="تخفیف (تومان)"><input name="discount" type="number" min="0" defaultValue="0" /></FormField><FormField label="هزینه ارسال (تومان)"><input name="shipping" type="number" min="0" defaultValue="0" /></FormField>{addressError && <div className="inline-error form-field--wide">دریافت نشانی‌ها کامل نشد: {addressError}</div>}{customerId && !loadingAddresses && !addressError && !addresses.length && <div className="inline-help form-field--wide">این مشتری نشانی ندارد. از صفحه مشتریان برای او نشانی ثبت کن.</div>}<InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت سفارش" onCancel={() => onNavigate("/orders")} /></form></section>
+   </ModuleBody>;
+ }
+ 
+@@ -844,8 +846,8 @@ function AccountingPage() {
+   const verified = data.payments.filter((item) => item.status === "Verified");
+   const total = verified.reduce((sum, item) => sum + item.amountRials, 0);
+   const outstanding = data.orders.filter((item) => !["Paid","Completed","Cancelled","Refunded"].includes(item.status)).reduce((sum, item) => sum + item.grandTotalRials, 0);
+-  return <ModuleBody><PageHeader icon={Calculator} title="حسابداری" description="پرداخت‌های واقعی، وجوه وصول‌شده و مانده سفارش‌ها." secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="دریافت تأییدشده" value={formatRials(total)} hint={`${verified.length} پرداخت`} /><MetricTile label="مطالبات سفارش‌ها" value={formatRials(outstanding)} hint="تسویه‌نشده" /><MetricTile label="پرداخت نیازمند بررسی" value={String(data.payments.filter((item) => item.status === "RequiresReview").length)} hint="پیگیری مالی" /></div>
+-    {data.payments.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شناسه</th><th>سفارش</th><th>روش</th><th>مبلغ</th><th>زمان تأیید</th><th>وضعیت</th></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td className="numeric-cell">{payment.id.slice(0,8)}</td><td>{data.orders.find((item) => item.id === payment.orderId)?.orderNumber || payment.orderId.slice(0,8)}</td><td>{translateStatus(payment.method)}</td><td>{formatRials(payment.amountRials)}</td><td>{formatDate(payment.verifiedAt)}</td><td><StatusBadge status={payment.status} /></td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="تراکنشی ثبت نشده" description="پرداخت‌های نقدی، کارت‌خوان و درگاه پس از ثبت اینجا دیده می‌شوند." />}
++  return <ModuleBody><PageHeader icon={Calculator} title="حسابداری" description="پرداخت‌های واقعی، وجوه وصول‌شده و مانده سفارش‌ها." secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="دریافت تأییدشده" value={formatMoney(total)} hint={`${verified.length} پرداخت`} /><MetricTile label="مطالبات سفارش‌ها" value={formatMoney(outstanding)} hint="تسویه‌نشده" /><MetricTile label="پرداخت نیازمند بررسی" value={String(data.payments.filter((item) => item.status === "RequiresReview").length)} hint="پیگیری مالی" /></div>
++    {data.payments.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شناسه</th><th>سفارش</th><th>روش</th><th>مبلغ</th><th>زمان تأیید</th><th>وضعیت</th></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td className="numeric-cell">{payment.id.slice(0,8)}</td><td>{data.orders.find((item) => item.id === payment.orderId)?.orderNumber || payment.orderId.slice(0,8)}</td><td>{translateStatus(payment.method)}</td><td>{formatMoney(payment.amountRials)}</td><td>{formatDate(payment.verifiedAt)}</td><td><StatusBadge status={payment.status} /></td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="تراکنشی ثبت نشده" description="پرداخت‌های نقدی، کارت‌خوان و درگاه پس از ثبت اینجا دیده می‌شوند." />}
+   </ModuleBody>;
+ }
+ 
+@@ -855,7 +857,7 @@ function ReportsPage() {
+   const todayInvoices = data.invoices.filter((item) => item.status !== "Voided" && new Date(item.issuedAt).toDateString() === today);
+   const sales = todayInvoices.reduce((sum, item) => sum + item.grandTotalRials, 0);
+   const profit = todayInvoices.reduce((sum, invoice) => sum + invoiceActualProfit(invoice), 0);
+-  return <ModuleBody><PageHeader icon={BarChart3} title="گزارش‌ها" description="گزارش عملیاتی بر پایه داده‌های فاکتور، سفارش، کالا و انبار." secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="فروش امروز" value={formatRials(sales)} hint={`${todayInvoices.length} فاکتور`} /><MetricTile label="سود واقعی امروز" value={formatRials(profit)} hint="فروش منهای خرید و تخفیف" /><MetricTile label="موجودی قابل فروش" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="قطعه" /><MetricTile label="مشتری فعال" value={String(data.customers.filter((item) => item.isActive).length)} hint="حساب" /></div>
++  return <ModuleBody><PageHeader icon={BarChart3} title="گزارش‌ها" description="گزارش عملیاتی بر پایه داده‌های فاکتور، سفارش، کالا و انبار." secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="فروش امروز" value={formatMoney(sales)} hint={`${todayInvoices.length} فاکتور`} /><MetricTile label="سود واقعی امروز" value={formatMoney(profit)} hint="فروش منهای خرید و تخفیف" /><MetricTile label="موجودی قابل فروش" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="قطعه" /><MetricTile label="مشتری فعال" value={String(data.customers.filter((item) => item.isActive).length)} hint="حساب" /></div>
+     <div className="reports-grid"><section className="lux-card report-card"><h2>وضعیت سفارش‌ها</h2>{["Pending","AwaitingPayment","Paid","Processing","Completed","Cancelled"].map((status) => <div className="report-row" key={status}><span>{translateStatus(status)}</span><strong>{data.orders.filter((item) => item.status === status).length}</strong></div>)}</section><section className="lux-card report-card"><h2>محصولات پرفروش</h2>{data.products.map((product) => ({ product, count: data.invoices.filter((invoice) => invoice.status !== "Voided").flatMap((item) => item.items).filter((line) => line.productName === product.name).reduce((sum, line) => sum + line.quantity, 0) })).sort((a,b) => b.count-a.count).slice(0,6).map((item) => <div className="report-row" key={item.product.id}><span>{item.product.name}</span><strong>{item.count}</strong></div>)}{!data.products.length && <p>داده‌ای ثبت نشده است.</p>}</section></div>
+   </ModuleBody>;
+ }
+@@ -894,7 +896,7 @@ function SuppliersPage({ path, onNavigate, onNotice }: RouteProps) {
+     event.preventDefault(); if (!purchaseSupplier) return; const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null });
+     const purchasedAt = textValue(form, "purchasedAt");
+     try {
+-      await request<SupplierPurchase>("/api/v1/inventory/supplier-purchases", { method: "POST", body: JSON.stringify({ supplierId: purchaseSupplier.id, warehouseId: textValue(form, "warehouseId"), productVariantId: textValue(form, "variantId"), quantity: numberValue(form, "quantity"), unitCostRials: numberValue(form, "unitCostRials"), sellingUnitPriceRials: numberValue(form, "sellingUnitPriceRials"), purchasedAt: purchasedAt ? new Date(purchasedAt).toISOString() : null, supplierReference: optionalText(form, "supplierReference"), notes: optionalText(form, "notes") }) });
++      await request<SupplierPurchase>("/api/v1/inventory/supplier-purchases", { method: "POST", body: JSON.stringify({ supplierId: purchaseSupplier.id, warehouseId: textValue(form, "warehouseId"), productVariantId: textValue(form, "variantId"), quantity: numberValue(form, "quantity"), unitCostRials: tomansToRials(numberValue(form, "unitCostRials")), sellingUnitPriceRials: tomansToRials(numberValue(form, "sellingUnitPriceRials")), purchasedAt: purchasedAt ? new Date(purchasedAt).toISOString() : null, supplierReference: optionalText(form, "supplierReference"), notes: optionalText(form, "notes") }) });
+       onNotice("خرید ثبت شد؛ موجودی، میانگین قیمت خرید و قیمت فروش به‌روز شدند."); closePurchase(); await refresh();
+     } catch (error) { setFormState({ saving: false, error: messageOf(error) }); }
+   };
+@@ -904,11 +906,11 @@ function SuppliersPage({ path, onNavigate, onNotice }: RouteProps) {
+   return <ModuleBody>
+     <PageHeader icon={Truck} title="تأمین‌کنندگان و خرید" description="ثبت تعداد خرید، قیمت خرید و قیمت فروش دستی؛ اختلاف قیمت به‌عنوان سود واقعی فاکتور محاسبه می‌شود." actionLabel="تأمین‌کننده جدید" onAction={() => { setFormState(initialFormState); setOpen(true); }} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} />
+     <DataNotice />
+-    <div className="module-metrics-grid"><MetricTile label="خریدهای ثبت‌شده" value={String(data.supplierPurchases.length)} hint="سند خرید" /><MetricTile label="جمع بهای خرید" value={formatRials(totalPurchaseCost)} hint="بهای تمام‌شده" /><MetricTile label="سود مورد انتظار" value={formatRials(totalExpectedProfit)} hint="پیش از فروش و تخفیف" /></div>
++    <div className="module-metrics-grid"><MetricTile label="خریدهای ثبت‌شده" value={String(data.supplierPurchases.length)} hint="سند خرید" /><MetricTile label="جمع بهای خرید" value={formatMoney(totalPurchaseCost)} hint="بهای تمام‌شده" /><MetricTile label="سود مورد انتظار" value={formatMoney(totalExpectedProfit)} hint="پیش از فروش و تخفیف" /></div>
+     {data.suppliers.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>کد</th><th>نام</th><th>مسئول تماس</th><th>تلفن</th><th>وضعیت</th><th /></tr></thead><tbody>{data.suppliers.map((supplier) => <tr key={supplier.id}><td>{supplier.code}</td><td><strong>{supplier.name}</strong></td><td>{supplier.contactName || "—"}</td><td>{supplier.phoneNumber || "—"}</td><td><StatusBadge status={supplier.isActive ? "Active" : "Inactive"} /></td><td>{supplier.isActive && <button className="row-action" type="button" onClick={() => { setFormState(initialFormState); setPurchaseDraft({ quantity: 1, unitCost: 0, sellingPrice: 0 }); setPurchaseSupplier(supplier); }}>ثبت خرید</button>}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="تأمین‌کننده‌ای ثبت نشده" description="ابتدا تأمین‌کننده را ثبت کن و سپس خرید کالا را از همان ردیف انجام بده." />}
+-    {data.supplierPurchases.length > 0 && <section className="module-subsection"><h2 className="section-title">آخرین خریدها</h2><TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>سند</th><th>تأمین‌کننده</th><th>محصول</th><th>تعداد</th><th>خرید واحد</th><th>فروش واحد</th><th>سود مورد انتظار</th><th>تاریخ</th></tr></thead><tbody>{data.supplierPurchases.map((purchase) => <tr key={purchase.id}><td>{purchase.purchaseNumber}</td><td>{purchase.supplierName}</td><td><strong>{purchase.productName} · {purchase.variantName}</strong><small>{purchase.sku}</small></td><td>{purchase.quantity}</td><td>{formatRials(purchase.unitCostRials)}</td><td>{formatRials(purchase.sellingUnitPriceRials)}</td><td><strong className={purchase.expectedTotalProfitRials < 0 ? "negative-text" : "positive-text"}>{formatRials(purchase.expectedTotalProfitRials)}</strong></td><td>{formatDate(purchase.purchasedAt)}</td></tr>)}</tbody></table></div></TableCard></section>}
++    {data.supplierPurchases.length > 0 && <section className="module-subsection"><h2 className="section-title">آخرین خریدها</h2><TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>سند</th><th>تأمین‌کننده</th><th>محصول</th><th>تعداد</th><th>خرید واحد</th><th>فروش واحد</th><th>سود مورد انتظار</th><th>تاریخ</th></tr></thead><tbody>{data.supplierPurchases.map((purchase) => <tr key={purchase.id}><td>{purchase.purchaseNumber}</td><td>{purchase.supplierName}</td><td><strong>{purchase.productName} · {purchase.variantName}</strong><small>{purchase.sku}</small></td><td>{purchase.quantity}</td><td>{formatMoney(purchase.unitCostRials)}</td><td>{formatMoney(purchase.sellingUnitPriceRials)}</td><td><strong className={purchase.expectedTotalProfitRials < 0 ? "negative-text" : "positive-text"}>{formatMoney(purchase.expectedTotalProfitRials)}</strong></td><td>{formatDate(purchase.purchasedAt)}</td></tr>)}</tbody></table></div></TableCard></section>}
+     <Modal open={open} title="ثبت تأمین‌کننده" onClose={close}><form className="entity-form" onSubmit={submit}><FormField label="کد"><input name="code" dir="ltr" required /></FormField><FormField label="نام مجموعه"><input name="name" required /></FormField><FormField label="مسئول تماس"><input name="contactName" /></FormField><FormField label="تلفن"><input name="phoneNumber" /></FormField><FormField label="ایمیل"><input name="email" type="email" /></FormField><FormField label="شناسه ملی"><input name="nationalId" /></FormField><FormField label="نشانی" wide><textarea name="addressLine" /></FormField><FormField label="یادداشت" wide><textarea name="notes" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت تأمین‌کننده" onCancel={close} /></form></Modal>
+-    <Modal open={Boolean(purchaseSupplier)} title={`ثبت خرید از ${purchaseSupplier?.name || "تأمین‌کننده"}`} description="قیمت فروش این فرم، قیمت فعال فروشگاه برای مدل انتخاب‌شده می‌شود." onClose={closePurchase}><form className="entity-form" onSubmit={submitPurchase}><FormField label="انبار"><select name="warehouseId" required><option value="">انتخاب کن</option>{data.warehouses.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField><FormField label="مدل کالا"><select name="variantId" required><option value="">انتخاب کن</option>{variants.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.productName} · {item.name} ({item.sku})</option>)}</select></FormField><FormField label="تعداد خرید"><input name="quantity" type="number" min="1" step="1" value={purchaseDraft.quantity} onChange={(event) => setPurchaseDraft((current) => ({ ...current, quantity: Number(event.target.value) }))} required /></FormField><FormField label="قیمت خرید هر واحد (ریال)"><input name="unitCostRials" type="number" min="0" step="1" value={purchaseDraft.unitCost} onChange={(event) => setPurchaseDraft((current) => ({ ...current, unitCost: Number(event.target.value) }))} required /></FormField><FormField label="قیمت فروش هر واحد (ریال)"><input name="sellingUnitPriceRials" type="number" min="1" step="1" value={purchaseDraft.sellingPrice} onChange={(event) => setPurchaseDraft((current) => ({ ...current, sellingPrice: Number(event.target.value) }))} required /></FormField><FormField label="زمان خرید"><input name="purchasedAt" type="datetime-local" /></FormField><div className={`purchase-profit-preview ${expectedProfit < 0 ? "is-negative" : ""}`}><span>سود مورد انتظار این خرید</span><strong>{formatRials(expectedProfit)}</strong><small>اختلاف قیمت فروش و خرید × تعداد</small></div><FormField label="شماره فاکتور تأمین‌کننده"><input name="supplierReference" maxLength={100} /></FormField><FormField label="یادداشت" wide><textarea name="notes" maxLength={1000} /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت خرید و قیمت فروش" onCancel={closePurchase} /></form></Modal>
++    <Modal open={Boolean(purchaseSupplier)} title={`ثبت خرید از ${purchaseSupplier?.name || "تأمین‌کننده"}`} description="قیمت فروش این فرم، قیمت فعال فروشگاه برای مدل انتخاب‌شده می‌شود." onClose={closePurchase}><form className="entity-form" onSubmit={submitPurchase}><FormField label="انبار"><select name="warehouseId" required><option value="">انتخاب کن</option>{data.warehouses.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField><FormField label="مدل کالا"><select name="variantId" required><option value="">انتخاب کن</option>{variants.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.productName} · {item.name} ({item.sku})</option>)}</select></FormField><FormField label="تعداد خرید"><input name="quantity" type="number" min="1" step="1" value={purchaseDraft.quantity} onChange={(event) => setPurchaseDraft((current) => ({ ...current, quantity: Number(event.target.value) }))} required /></FormField><FormField label="قیمت خرید هر واحد (تومان)"><input name="unitCostRials" type="number" min="0" step="1" value={purchaseDraft.unitCost} onChange={(event) => setPurchaseDraft((current) => ({ ...current, unitCost: Number(event.target.value) }))} required /></FormField><FormField label="قیمت فروش هر واحد (تومان)"><input name="sellingUnitPriceRials" type="number" min="1" step="1" value={purchaseDraft.sellingPrice} onChange={(event) => setPurchaseDraft((current) => ({ ...current, sellingPrice: Number(event.target.value) }))} required /></FormField><FormField label="زمان خرید"><input name="purchasedAt" type="datetime-local" /></FormField><div className={`purchase-profit-preview ${expectedProfit < 0 ? "is-negative" : ""}`}><span>سود مورد انتظار این خرید</span><strong>{formatMoney(tomansToRials(expectedProfit))}</strong><small>اختلاف قیمت فروش و خرید × تعداد</small></div><FormField label="شماره فاکتور تأمین‌کننده"><input name="supplierReference" maxLength={100} /></FormField><FormField label="یادداشت" wide><textarea name="notes" maxLength={1000} /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت خرید و قیمت فروش" onCancel={closePurchase} /></form></Modal>
+   </ModuleBody>;
+ }
+ 
+@@ -974,7 +976,7 @@ export function OperationsRouter(props: RouteProps) {
+   if(base.startsWith("/accounting"))return <AccountingPage/>;
+   if(base.startsWith("/reports"))return <ReportsPage/>;
+   if(base.startsWith("/employees"))return <EmployeesPage {...props}/>;
+-  if(base.startsWith("/suppliers"))return <SuppliersPage {...props}/>;
++  if(base.startsWith("/suppliers"))return <SupplierPurchasesPage {...props}/>;
+   if(base.startsWith("/crm"))return <CrmPage {...props}/>;
+   if(base.startsWith("/settings"))return <SettingsPage {...props}/>;
+   if(base.startsWith("/profile"))return <ManagerProfilePage {...props}/>;
+diff --git a/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx b/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx
+index 47711a557033e177fcdd9511079a08a87887dede..4f1011b845199470b21cad4c4cde54bf21a735b0 100644
+--- a/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx
++++ b/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx
+@@ -1,18 +1,16 @@
+ import type { LucideIcon } from "lucide-react";
+ import { AlertTriangle, Inbox, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
+ import type { PropsWithChildren, ReactNode } from "react";
++import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
+ 
+-export const rialFormatter = new Intl.NumberFormat("fa-IR", {
+-  maximumFractionDigits: 0,
+-});
+-
+-export function formatRials(value: number): string {
+-  return `${rialFormatter.format(value)} ریال`;
++export function formatMoney(valueInRials: number): string {
++  return formatTomansFromRials(valueInRials);
+ }
+ 
+ export function formatDate(value?: string | null): string {
+   if (!value) return "—";
+-  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
++  const locale = activeNumberLocale() === "fa-IR" ? "fa-IR-u-ca-persian" : "en-US";
++  return new Intl.DateTimeFormat(locale, {
+     year: "numeric",
+     month: "short",
+     day: "numeric",
+diff --git a/GoldInvoice.Client/src/features/operations/SupplierPurchasesPage.tsx b/GoldInvoice.Client/src/features/operations/SupplierPurchasesPage.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..7996a62f632e4ff8f92507824a996e95e7ba93c7
+--- /dev/null
++++ b/GoldInvoice.Client/src/features/operations/SupplierPurchasesPage.tsx
+@@ -0,0 +1,553 @@
++import { Check, PackagePlus, RefreshCw, Truck, Warehouse as WarehouseIcon } from "lucide-react";
++import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
++import { tomansToRials } from "../../lib/money";
++import { useOperations } from "./OperationsContext";
++import {
++  EmptyState,
++  FormActions,
++  FormField,
++  formatDate,
++  formatMoney,
++  InlineError,
++  MetricTile,
++  Modal,
++  PageHeader,
++  RefreshButton,
++  StatusBadge,
++  TableCard,
++} from "./PagePrimitives";
++import type {
++  Product,
++  ProductVariant,
++  Supplier,
++  SupplierPurchase,
++  Warehouse,
++} from "./operations.types";
++
++interface SupplierPurchasesPageProps {
++  path: string;
++  onNavigate: (path: string) => void;
++  onNotice: (message: string) => void;
++}
++
++type ResourceMode = "existing" | "new";
++
++interface PurchaseDraft {
++  supplierId: string;
++  warehouseMode: ResourceMode;
++  warehouseId: string;
++  warehouseCode: string;
++  warehouseName: string;
++  productMode: ResourceMode;
++  variantId: string;
++  categoryId: string;
++  productName: string;
++  productDescription: string;
++  variantName: string;
++  sku: string;
++  quantity: number;
++  unitCostTomans: number;
++  sellingPriceTomans: number;
++  purchasedAt: string;
++  supplierReference: string;
++  notes: string;
++  karat: number;
++  grossWeight: number;
++  netGoldWeight: number;
++  stoneWeight: number;
++  otherMaterialWeight: number;
++  hasStone: boolean;
++  isWeightVariable: boolean;
++}
++
++const steps = [
++  "تأمین‌کننده",
++  "انبار",
++  "محصول",
++  "قیمت و تعداد",
++  "تصویر و مشخصات",
++  "تأیید نهایی",
++] as const;
++
++function localDateTimeValue(): string {
++  const now = new Date();
++  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
++}
++
++function createDraft(supplierId = ""): PurchaseDraft {
++  return {
++    supplierId,
++    warehouseMode: "existing",
++    warehouseId: "",
++    warehouseCode: "",
++    warehouseName: "",
++    productMode: "new",
++    variantId: "",
++    categoryId: "",
++    productName: "",
++    productDescription: "",
++    variantName: "مدل اصلی",
++    sku: "",
++    quantity: 1,
++    unitCostTomans: 0,
++    sellingPriceTomans: 0,
++    purchasedAt: localDateTimeValue(),
++    supplierReference: "",
++    notes: "",
++    karat: 18,
++    grossWeight: 1,
++    netGoldWeight: 1,
++    stoneWeight: 0,
++    otherMaterialWeight: 0,
++    hasStone: false,
++    isWeightVariable: false,
++  };
++}
++
++function messageOf(error: unknown): string {
++  return error instanceof Error ? error.message : "عملیات کامل نشد.";
++}
++
++function makeSlug(sku: string): string {
++  const normalized = sku.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
++  return `purchase-${normalized || "item"}-${Date.now().toString(36)}`;
++}
++
++export function SupplierPurchasesPage({ path, onNotice }: SupplierPurchasesPageProps) {
++  const { data, request, refresh, refreshing } = useOperations();
++  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
++  const [supplierSaving, setSupplierSaving] = useState(false);
++  const [supplierError, setSupplierError] = useState<string | null>(null);
++  const [wizardOpen, setWizardOpen] = useState(false);
++  const [step, setStep] = useState(0);
++  const [draft, setDraft] = useState<PurchaseDraft>(() => createDraft());
++  const [imageFile, setImageFile] = useState<File | null>(null);
++  const [wizardError, setWizardError] = useState<string | null>(null);
++  const [saving, setSaving] = useState(false);
++  const queryOpened = useRef(false);
++  const createdWarehouseId = useRef<string | null>(null);
++  const createdProductId = useRef<string | null>(null);
++  const createdVariantId = useRef<string | null>(null);
++  const imageUploaded = useRef(false);
++
++  const variants = useMemo(
++    () => data.products.flatMap((product) =>
++      product.variants.map((variant) => ({ ...variant, productName: product.name }))),
++    [data.products],
++  );
++
++  const activeSuppliers = data.suppliers.filter((item) => item.isActive);
++  const activeWarehouses = data.warehouses.filter((item) => item.isActive);
++  const activeVariants = variants.filter((item) => item.isActive);
++  const selectedSupplier = data.suppliers.find((item) => item.id === draft.supplierId);
++  const selectedWarehouse = data.warehouses.find((item) => item.id === draft.warehouseId);
++  const selectedVariant = variants.find((item) => item.id === draft.variantId);
++  const expectedProfitRials = tomansToRials(
++    Math.round((draft.sellingPriceTomans - draft.unitCostTomans) * draft.quantity),
++  );
++
++  const update = <K extends keyof PurchaseDraft>(key: K, value: PurchaseDraft[K]) => {
++    setDraft((current) => ({ ...current, [key]: value }));
++    setWizardError(null);
++  };
++
++  const resetCreatedResources = () => {
++    createdWarehouseId.current = null;
++    createdProductId.current = null;
++    createdVariantId.current = null;
++    imageUploaded.current = false;
++  };
++
++  const openWizard = (supplierId = "") => {
++    const fallbackSupplier = activeSuppliers[0]?.id ?? "";
++    setDraft(createDraft(supplierId || fallbackSupplier));
++    setImageFile(null);
++    setWizardError(null);
++    setSaving(false);
++    setStep(0);
++    resetCreatedResources();
++    setWizardOpen(true);
++  };
++
++  const closeWizard = () => {
++    if (saving) return;
++    setWizardOpen(false);
++    setWizardError(null);
++  };
++
++  useEffect(() => {
++    if (queryOpened.current || !new URLSearchParams(path.split("?")[1] || "").has("purchase")) return;
++    if (!activeSuppliers.length) return;
++    queryOpened.current = true;
++    openWizard(activeSuppliers[0].id);
++  }, [activeSuppliers, path]);
++
++  const validateStep = (index: number): string | null => {
++    if (index === 0 && !draft.supplierId) return "یک تأمین‌کننده فعال انتخاب کن.";
++    if (index === 1) {
++      if (draft.warehouseMode === "existing" && !draft.warehouseId) return "انبار مقصد را انتخاب کن.";
++      if (draft.warehouseMode === "new" && (!draft.warehouseCode.trim() || !draft.warehouseName.trim())) {
++        return "کد و نام انبار جدید را وارد کن.";
++      }
++    }
++    if (index === 2) {
++      if (draft.productMode === "existing" && !draft.variantId) return "محصول موجود را انتخاب کن.";
++      if (draft.productMode === "new" && (!draft.productName.trim() || !draft.variantName.trim() || !draft.sku.trim())) {
++        return "نام محصول، نام مدل و کد SKU را کامل کن.";
++      }
++    }
++    if (index === 3) {
++      if (!Number.isInteger(draft.quantity) || draft.quantity < 1) return "تعداد خرید باید یک عدد صحیح مثبت باشد.";
++      if (!Number.isSafeInteger(draft.unitCostTomans) || draft.unitCostTomans < 0) return "قیمت خرید را به تومان و به‌صورت عدد صحیح وارد کن.";
++      if (!Number.isSafeInteger(draft.sellingPriceTomans) || draft.sellingPriceTomans < 1) return "قیمت فروش را به تومان و به‌صورت عدد صحیح وارد کن.";
++    }
++    if (index === 4 && draft.productMode === "new") {
++      if (!imageFile) return "برای محصول جدید یک تصویر انتخاب کن.";
++      if (imageFile.size > 5 * 1024 * 1024) return "حجم تصویر نباید بیشتر از ۵ مگابایت باشد.";
++      if (draft.karat < 1 || draft.karat > 24) return "عیار باید بین ۱ تا ۲۴ باشد.";
++      if (draft.grossWeight <= 0 || draft.netGoldWeight <= 0) return "وزن ناخالص و وزن خالص باید بیشتر از صفر باشند.";
++      if (draft.netGoldWeight > draft.grossWeight) return "وزن خالص نمی‌تواند بیشتر از وزن ناخالص باشد.";
++    }
++    return null;
++  };
++
++  const nextStep = () => {
++    const error = validateStep(step);
++    if (error) {
++      setWizardError(error);
++      return;
++    }
++    setWizardError(null);
++    setStep((current) => Math.min(current + 1, steps.length - 1));
++  };
++
++  const submitSupplier = async (event: FormEvent<HTMLFormElement>) => {
++    event.preventDefault();
++    const form = new FormData(event.currentTarget);
++    setSupplierSaving(true);
++    setSupplierError(null);
++    try {
++      const supplier = await request<Supplier>("/api/v1/suppliers", {
++        method: "POST",
++        body: JSON.stringify({
++          code: String(form.get("code") || "").trim(),
++          name: String(form.get("name") || "").trim(),
++          contactName: String(form.get("contactName") || "").trim() || null,
++          phoneNumber: String(form.get("phoneNumber") || "").trim() || null,
++          email: String(form.get("email") || "").trim() || null,
++          nationalId: String(form.get("nationalId") || "").trim() || null,
++          addressLine: String(form.get("addressLine") || "").trim() || null,
++          notes: String(form.get("notes") || "").trim() || null,
++        }),
++      });
++      await refresh();
++      setSupplierModalOpen(false);
++      setSupplierSaving(false);
++      onNotice("تأمین‌کننده ثبت شد؛ حالا خرید را تکمیل کن.");
++      openWizard(supplier.id);
++    } catch (error) {
++      setSupplierSaving(false);
++      setSupplierError(messageOf(error));
++    }
++  };
++
++  const submitPurchase = async () => {
++    const finalError = [0, 1, 2, 3, 4].map(validateStep).find(Boolean);
++    if (finalError) {
++      setWizardError(finalError);
++      return;
++    }
++
++    setSaving(true);
++    setWizardError(null);
++    try {
++      let warehouseId = draft.warehouseId;
++      if (draft.warehouseMode === "new") {
++        if (!createdWarehouseId.current) {
++          const warehouse = await request<Warehouse>("/api/v1/inventory/warehouses", {
++            method: "POST",
++            body: JSON.stringify({ code: draft.warehouseCode.trim(), name: draft.warehouseName.trim() }),
++          });
++          createdWarehouseId.current = warehouse.id;
++        }
++        warehouseId = createdWarehouseId.current ?? "";
++      }
++
++      let variantId = draft.variantId;
++      if (draft.productMode === "new") {
++        if (!createdProductId.current) {
++          const product = await request<Product>("/api/v1/catalog/products", {
++            method: "POST",
++            body: JSON.stringify({
++              productCategoryId: draft.categoryId || null,
++              name: draft.productName.trim(),
++              slug: makeSlug(draft.sku),
++              description: draft.productDescription.trim() || null,
++            }),
++          });
++          createdProductId.current = product.id;
++        }
++        if (!createdVariantId.current) {
++          const variant = await request<ProductVariant>(
++            `/api/v1/catalog/products/${createdProductId.current}/variants`,
++            {
++              method: "POST",
++              body: JSON.stringify({
++                sku: draft.sku.trim(),
++                name: draft.variantName.trim(),
++                goldDetail: {
++                  karat: draft.karat,
++                  grossWeight: draft.grossWeight,
++                  netGoldWeight: draft.netGoldWeight,
++                  stoneWeight: draft.stoneWeight,
++                  otherMaterialWeight: draft.otherMaterialWeight,
++                  manufacturingWageType: "FixedRials",
++                  manufacturingWageValue: 0,
++                  profitPercentage: 0,
++                  taxPercentage: 0,
++                  hasStone: draft.hasStone,
++                  isWeightVariable: draft.isWeightVariable,
++                },
++              }),
++            },
++          );
++          createdVariantId.current = variant.id;
++        }
++        variantId = createdVariantId.current ?? "";
++
++        if (!imageUploaded.current && imageFile) {
++          const imageBody = new FormData();
++          imageBody.append("file", imageFile);
++          imageBody.append("altText", draft.productName.trim());
++          await request(`/api/v1/catalog/products/${createdProductId.current}/image`, {
++            method: "PUT",
++            body: imageBody,
++          });
++          imageUploaded.current = true;
++        }
++      }
++
++      await request<SupplierPurchase>("/api/v1/inventory/supplier-purchases", {
++        method: "POST",
++        body: JSON.stringify({
++          supplierId: draft.supplierId,
++          warehouseId,
++          productVariantId: variantId,
++          quantity: draft.quantity,
++          unitCostRials: tomansToRials(draft.unitCostTomans),
++          sellingUnitPriceRials: tomansToRials(draft.sellingPriceTomans),
++          purchasedAt: draft.purchasedAt ? new Date(draft.purchasedAt).toISOString() : null,
++          supplierReference: draft.supplierReference.trim() || null,
++          notes: draft.notes.trim() || null,
++        }),
++      });
++
++      setWizardOpen(false);
++      setSaving(false);
++      onNotice("خرید تأیید شد؛ انبار، محصول، قیمت فروش و موجودی به‌روز شدند.");
++      await refresh();
++    } catch (error) {
++      setSaving(false);
++      setWizardError(messageOf(error));
++    }
++  };
++
++  const handleImage = (event: ChangeEvent<HTMLInputElement>) => {
++    setImageFile(event.target.files?.[0] ?? null);
++    setWizardError(null);
++  };
++
++  const totalPurchaseCost = data.supplierPurchases.reduce((sum, item) => sum + item.totalCostRials, 0);
++  const totalExpectedProfit = data.supplierPurchases.reduce((sum, item) => sum + item.expectedTotalProfitRials, 0);
++
++  return (
++    <div className="module-page">
++      <PageHeader
++        icon={Truck}
++        title="تأمین‌کنندگان و خرید"
++        description="خرید را از تأمین‌کننده شروع کن؛ انبار، محصول، قیمت و تصویر در یک مسیر کوتاه ثبت می‌شوند."
++        actionLabel="خرید جدید"
++        onAction={() => openWizard()}
++        secondary={
++          <>
++            <button className="secondary-button" type="button" onClick={() => setSupplierModalOpen(true)}>
++              <PackagePlus size={16} /> تأمین‌کننده جدید
++            </button>
++            <RefreshButton refreshing={refreshing} onClick={() => void refresh()} />
++          </>
++        }
++      />
++
++      <div className="module-metrics-grid">
++        <MetricTile label="خریدهای ثبت‌شده" value={String(data.supplierPurchases.length)} hint="سند خرید" />
++        <MetricTile label="جمع بهای خرید" value={formatMoney(totalPurchaseCost)} hint="بهای تمام‌شده" />
++        <MetricTile label="سود مورد انتظار" value={formatMoney(totalExpectedProfit)} hint="پیش از فروش و تخفیف" />
++      </div>
++
++      {data.suppliers.length ? (
++        <TableCard>
++          <div className="table-scroll">
++            <table className="data-table">
++              <thead><tr><th>کد</th><th>نام</th><th>مسئول تماس</th><th>تلفن</th><th>وضعیت</th><th /></tr></thead>
++              <tbody>
++                {data.suppliers.map((supplier) => (
++                  <tr key={supplier.id}>
++                    <td>{supplier.code}</td><td><strong>{supplier.name}</strong></td>
++                    <td>{supplier.contactName || "—"}</td><td>{supplier.phoneNumber || "—"}</td>
++                    <td><StatusBadge status={supplier.isActive ? "Active" : "Inactive"} /></td>
++                    <td>{supplier.isActive && <button className="row-action" type="button" onClick={() => openWizard(supplier.id)}>شروع خرید</button>}</td>
++                  </tr>
++                ))}
++              </tbody>
++            </table>
++          </div>
++        </TableCard>
++      ) : (
++        <EmptyState title="تأمین‌کننده‌ای ثبت نشده" description="ابتدا تأمین‌کننده را ثبت کن؛ سپس ویزارد خرید خودکار باز می‌شود." />
++      )}
++
++      {data.supplierPurchases.length > 0 && (
++        <section className="module-subsection">
++          <h2 className="section-title">آخرین خریدها</h2>
++          <TableCard><div className="table-scroll"><table className="data-table">
++            <thead><tr><th>سند</th><th>تأمین‌کننده</th><th>محصول</th><th>تعداد</th><th>خرید واحد</th><th>فروش واحد</th><th>سود مورد انتظار</th><th>تاریخ</th></tr></thead>
++            <tbody>{data.supplierPurchases.map((purchase) => <tr key={purchase.id}>
++              <td>{purchase.purchaseNumber}</td><td>{purchase.supplierName}</td>
++              <td><strong>{purchase.productName} · {purchase.variantName}</strong><small>{purchase.sku}</small></td>
++              <td>{purchase.quantity}</td><td>{formatMoney(purchase.unitCostRials)}</td>
++              <td>{formatMoney(purchase.sellingUnitPriceRials)}</td>
++              <td><strong className={purchase.expectedTotalProfitRials < 0 ? "negative-text" : "positive-text"}>{formatMoney(purchase.expectedTotalProfitRials)}</strong></td>
++              <td>{formatDate(purchase.purchasedAt)}</td>
++            </tr>)}</tbody>
++          </table></div></TableCard>
++        </section>
++      )}
++
++      <Modal open={supplierModalOpen} title="ثبت تأمین‌کننده" onClose={() => !supplierSaving && setSupplierModalOpen(false)}>
++        <form className="entity-form" onSubmit={submitSupplier}>
++          <FormField label="کد"><input name="code" dir="ltr" maxLength={50} required /></FormField>
++          <FormField label="نام مجموعه"><input name="name" maxLength={200} required /></FormField>
++          <FormField label="مسئول تماس"><input name="contactName" /></FormField>
++          <FormField label="تلفن"><input name="phoneNumber" /></FormField>
++          <FormField label="ایمیل"><input name="email" type="email" dir="ltr" /></FormField>
++          <FormField label="شناسه ملی"><input name="nationalId" /></FormField>
++          <FormField label="نشانی" wide><textarea name="addressLine" /></FormField>
++          <FormField label="یادداشت" wide><textarea name="notes" /></FormField>
++          <InlineError message={supplierError} />
++          <FormActions saving={supplierSaving} submitLabel="ثبت و شروع خرید" onCancel={() => setSupplierModalOpen(false)} />
++        </form>
++      </Modal>
++
++      <Modal
++        open={wizardOpen}
++        title="ثبت خرید تأمین‌کننده"
++        description="همه مراحل در همین پنجره انجام می‌شود؛ ثبت نهایی در مرحله آخر است."
++        onClose={closeWizard}
++      >
++        <div className="purchase-wizard">
++          <ol className="wizard-steps" aria-label="مراحل ثبت خرید">
++            {steps.map((label, index) => (
++              <li className={index === step ? "is-current" : index < step ? "is-complete" : ""} key={label}>
++                <button type="button" onClick={() => index < step && setStep(index)} disabled={index > step || saving}>
++                  <span>{index < step ? <Check size={15} /> : index + 1}</span><small>{label}</small>
++                </button>
++              </li>
++            ))}
++          </ol>
++
++          <div className="wizard-panel">
++            {step === 0 && <section>
++              <h3>۱. تأمین‌کننده را انتخاب کن</h3>
++              <p>شروع عملیات از تأمین‌کننده است؛ فقط تأمین‌کننده‌های فعال نمایش داده می‌شوند.</p>
++              <FormField label="تأمین‌کننده" wide><select value={draft.supplierId} onChange={(event) => update("supplierId", event.target.value)} required>
++                <option value="">انتخاب کن</option>{activeSuppliers.map((item) => <option value={item.id} key={item.id}>{item.name} ({item.code})</option>)}
++              </select></FormField>
++              {!activeSuppliers.length && <EmptyState title="تأمین‌کننده فعال وجود ندارد" description="این پنجره را ببند و یک تأمین‌کننده جدید ثبت کن." />}
++            </section>}
++
++            {step === 1 && <section>
++              <h3>۲. انبار مقصد</h3><p>یک انبار موجود را انتخاب کن یا همین‌جا انبار جدید بساز.</p>
++              <div className="wizard-mode-switch">
++                <button type="button" className={draft.warehouseMode === "existing" ? "is-active" : ""} onClick={() => update("warehouseMode", "existing")}><WarehouseIcon size={17} /> انبار موجود</button>
++                <button type="button" className={draft.warehouseMode === "new" ? "is-active" : ""} onClick={() => update("warehouseMode", "new")}><PackagePlus size={17} /> انبار جدید</button>
++              </div>
++              {draft.warehouseMode === "existing" ? <div className="entity-form">
++                <FormField label="انبار" wide><select value={draft.warehouseId} onChange={(event) => update("warehouseId", event.target.value)}><option value="">انتخاب کن</option>{activeWarehouses.map((item) => <option value={item.id} key={item.id}>{item.name} ({item.code})</option>)}</select></FormField>
++              </div> : <div className="entity-form">
++                <FormField label="کد انبار"><input value={draft.warehouseCode} maxLength={50} dir="ltr" onChange={(event) => update("warehouseCode", event.target.value)} /></FormField>
++                <FormField label="نام انبار"><input value={draft.warehouseName} maxLength={200} onChange={(event) => update("warehouseName", event.target.value)} /></FormField>
++              </div>}
++            </section>}
++
++            {step === 2 && <section>
++              <h3>۳. محصول و مدل</h3><p>می‌توانی محصول موجود را انتخاب کنی یا محصول جدید را در همین خرید بسازی.</p>
++              <div className="wizard-mode-switch">
++                <button type="button" className={draft.productMode === "new" ? "is-active" : ""} onClick={() => update("productMode", "new")}><PackagePlus size={17} /> محصول جدید</button>
++                <button type="button" className={draft.productMode === "existing" ? "is-active" : ""} onClick={() => update("productMode", "existing")}><Check size={17} /> محصول موجود</button>
++              </div>
++              {draft.productMode === "existing" ? <div className="entity-form">
++                <FormField label="محصول و مدل" wide><select value={draft.variantId} onChange={(event) => update("variantId", event.target.value)}><option value="">انتخاب کن</option>{activeVariants.map((item) => <option value={item.id} key={item.id}>{item.productName} · {item.name} ({item.sku})</option>)}</select></FormField>
++              </div> : <div className="entity-form">
++                <FormField label="نام محصول"><input value={draft.productName} maxLength={200} onChange={(event) => update("productName", event.target.value)} /></FormField>
++                <FormField label="دسته‌بندی"><select value={draft.categoryId} onChange={(event) => update("categoryId", event.target.value)}><option value="">بدون دسته‌بندی</option>{data.categories.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField>
++                <FormField label="نام مدل"><input value={draft.variantName} maxLength={200} onChange={(event) => update("variantName", event.target.value)} /></FormField>
++                <FormField label="کد SKU"><input value={draft.sku} maxLength={64} dir="ltr" onChange={(event) => update("sku", event.target.value)} /></FormField>
++                <FormField label="توضیحات محصول" wide><textarea value={draft.productDescription} maxLength={4000} onChange={(event) => update("productDescription", event.target.value)} /></FormField>
++              </div>}
++            </section>}
++
++            {step === 3 && <section>
++              <h3>۴. تعداد و قیمت‌ها</h3><p>همه مبالغ این فرم و بخش‌های قابل مشاهده سامانه به تومان هستند.</p>
++              <div className="entity-form">
++                <FormField label="تعداد خرید"><input type="number" min="1" step="1" value={draft.quantity} onChange={(event) => update("quantity", Number(event.target.value))} /></FormField>
++                <FormField label="قیمت خرید هر واحد (تومان)"><input type="number" min="0" step="1" value={draft.unitCostTomans} onChange={(event) => update("unitCostTomans", Number(event.target.value))} /></FormField>
++                <FormField label="قیمت فروش هر واحد (تومان)"><input type="number" min="1" step="1" value={draft.sellingPriceTomans} onChange={(event) => update("sellingPriceTomans", Number(event.target.value))} /></FormField>
++                <FormField label="زمان خرید"><input type="datetime-local" value={draft.purchasedAt} onChange={(event) => update("purchasedAt", event.target.value)} /></FormField>
++                <FormField label="شماره فاکتور تأمین‌کننده"><input maxLength={100} value={draft.supplierReference} onChange={(event) => update("supplierReference", event.target.value)} /></FormField>
++                <FormField label="یادداشت" wide><textarea maxLength={1000} value={draft.notes} onChange={(event) => update("notes", event.target.value)} /></FormField>
++              </div>
++              <div className={`purchase-profit-preview ${expectedProfitRials < 0 ? "is-negative" : ""}`}><span>سود مورد انتظار این خرید</span><strong>{formatMoney(expectedProfitRials)}</strong><small>اختلاف قیمت فروش و خرید × تعداد</small></div>
++            </section>}
++
++            {step === 4 && <section>
++              <h3>۵. تصویر و مشخصات تکمیلی</h3>
++              {draft.productMode === "existing" ? <div className="wizard-existing-summary"><Check size={24} /><div><strong>مشخصات محصول موجود حفظ می‌شود</strong><p>تصویر و مشخصات قبلی تغییر نمی‌کنند؛ فقط خرید، موجودی و قیمت فروش ثبت می‌شود.</p></div></div> : <>
++                <p>تصویر اصلی و مشخصات طلا را پیش از تأیید نهایی اضافه کن.</p>
++                <div className="entity-form">
++                  <FormField label="تصویر محصول" hint="JPG، PNG یا WebP؛ حداکثر ۵ مگابایت" wide><input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleImage} /></FormField>
++                  <FormField label="عیار"><input type="number" min="1" max="24" step="1" value={draft.karat} onChange={(event) => update("karat", Number(event.target.value))} /></FormField>
++                  <FormField label="وزن ناخالص (گرم)"><input type="number" min="0.001" step="0.001" value={draft.grossWeight} onChange={(event) => update("grossWeight", Number(event.target.value))} /></FormField>
++                  <FormField label="وزن خالص طلا (گرم)"><input type="number" min="0.001" step="0.001" value={draft.netGoldWeight} onChange={(event) => update("netGoldWeight", Number(event.target.value))} /></FormField>
++                  <FormField label="وزن سنگ (گرم)"><input type="number" min="0" step="0.001" value={draft.stoneWeight} onChange={(event) => update("stoneWeight", Number(event.target.value))} /></FormField>
++                  <FormField label="وزن سایر مواد (گرم)"><input type="number" min="0" step="0.001" value={draft.otherMaterialWeight} onChange={(event) => update("otherMaterialWeight", Number(event.target.value))} /></FormField>
++                  <label className="checkbox-field"><input type="checkbox" checked={draft.hasStone} onChange={(event) => update("hasStone", event.target.checked)} /><span>دارای سنگ</span></label>
++                  <label className="checkbox-field"><input type="checkbox" checked={draft.isWeightVariable} onChange={(event) => update("isWeightVariable", event.target.checked)} /><span>وزن متغیر</span></label>
++                </div>
++              </>}
++            </section>}
++
++            {step === 5 && <section>
++              <h3>۶. بررسی و تأیید</h3><p>بعد از تأیید، خرید و همه موارد جدید به‌ترتیب ثبت می‌شوند.</p>
++              <dl className="wizard-review">
++                <div><dt>تأمین‌کننده</dt><dd>{selectedSupplier?.name || "—"}</dd></div>
++                <div><dt>انبار</dt><dd>{draft.warehouseMode === "new" ? `${draft.warehouseName} (جدید)` : selectedWarehouse?.name || "—"}</dd></div>
++                <div><dt>محصول</dt><dd>{draft.productMode === "new" ? `${draft.productName} · ${draft.variantName}` : selectedVariant ? `${selectedVariant.productName} · ${selectedVariant.name}` : "—"}</dd></div>
++                <div><dt>تعداد</dt><dd>{draft.quantity}</dd></div>
++                <div><dt>قیمت خرید واحد</dt><dd>{formatMoney(tomansToRials(draft.unitCostTomans))}</dd></div>
++                <div><dt>قیمت فروش واحد</dt><dd>{formatMoney(tomansToRials(draft.sellingPriceTomans))}</dd></div>
++                <div><dt>بهای کل خرید</dt><dd>{formatMoney(tomansToRials(draft.unitCostTomans * draft.quantity))}</dd></div>
++                <div><dt>سود مورد انتظار</dt><dd className={expectedProfitRials < 0 ? "negative-text" : "positive-text"}>{formatMoney(expectedProfitRials)}</dd></div>
++              </dl>
++            </section>}
++          </div>
++
++          <InlineError message={wizardError} />
++          <div className="wizard-actions">
++            <button className="secondary-button" type="button" onClick={step === 0 ? closeWizard : () => setStep((current) => current - 1)} disabled={saving}>{step === 0 ? "انصراف" : "مرحله قبل"}</button>
++            {step < steps.length - 1 ? <button className="primary-button" type="button" onClick={nextStep} disabled={saving}>مرحله بعد</button> : <button className="primary-button" type="button" onClick={() => void submitPurchase()} disabled={saving}>{saving ? <><RefreshCw className="spin" size={16} /> در حال ثبت…</> : <><Check size={17} /> تأیید و ثبت خرید</>}</button>}
++          </div>
++        </div>
++      </Modal>
++    </div>
++  );
++}
+diff --git a/GoldInvoice.Client/src/i18n/LocaleContext.tsx b/GoldInvoice.Client/src/i18n/LocaleContext.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..9292b6c7e74b2dfe646c37070d97868ac57c2053
+--- /dev/null
++++ b/GoldInvoice.Client/src/i18n/LocaleContext.tsx
+@@ -0,0 +1,824 @@
++import {
++  createContext,
++  type PropsWithChildren,
++  useContext,
++  useEffect,
++  useMemo,
++  useRef,
++  useState,
++} from "react";
++
++export type AppLanguage = "fa" | "en";
++
++interface LocaleContextValue {
++  language: AppLanguage;
++  direction: "rtl" | "ltr";
++  locale: "fa-IR" | "en-US";
++  setLanguage: (language: AppLanguage) => void;
++  toggleLanguage: () => void;
++}
++
++const STORAGE_KEY = "vendome-language";
++const LocaleContext = createContext<LocaleContextValue | null>(null);
++
++const translations: Record<string, string> = {
++  "مدیریت وندوم": "Vendome Management",
++  "مِزون وندوم": "Vendome Maison",
++  "بخش‌ها": "Sections",
++  "داشبورد": "Dashboard",
++  "فاکتورها": "Invoices",
++  "فاکتور": "Invoice",
++  "مشتریان": "Customers",
++  "مشتری": "Customer",
++  "محصولات": "Products",
++  "محصول": "Product",
++  "انبار": "Inventory",
++  "سفارش‌ها": "Orders",
++  "سفارش": "Order",
++  "حسابداری": "Accounting",
++  "گزارش‌ها": "Reports",
++  "کارکنان": "Employees",
++  "تأمین‌کنندگان": "Suppliers",
++  "تأمین‌کننده": "Supplier",
++  "ارتباط با مشتری": "Customer relations",
++  "تنظیمات": "Settings",
++  "پروفایل مدیر": "Manager profile",
++  "خروج امن": "Secure sign out",
++  "زبان": "Language",
++  "فارسی": "Persian",
++  "English": "English",
++  "تغییر به انگلیسی": "Switch to English",
++  "تغییر به فارسی": "Switch to Persian",
++  "جست‌وجوی سراسری": "Global search",
++  "جست‌وجوی فاکتور، مشتری، کد کالا…": "Search invoices, customers, SKU…",
++  "اعلان‌ها": "Notifications",
++  "اعلان جدیدی ندارید.": "You have no new notifications.",
++  "همگام": "Synced",
++  "در حال اتصال": "Connecting",
++  "اتصال مجدد": "Reconnecting",
++  "آفلاین": "Offline",
++  "وضعیت همگام‌سازی لحظه‌ای": "Live synchronization status",
++  "تغییر به حالت تیره": "Switch to dark mode",
++  "تغییر به حالت روشن": "Switch to light mode",
++  "رفتن به پروفایل مدیر": "Open manager profile",
++  "باز کردن منوی حساب": "Open account menu",
++  "باز کردن منو": "Open menu",
++  "بستن منو": "Close menu",
++  "بستن": "Close",
++  "نسخه ۲.۴": "Version 2.4",
++  "مِزون وندوم · میدان وندوم، پاریس": "Vendome Maison · Place Vendome, Paris",
++  "عملیات سریع": "Quick actions",
++  "عملکرد": "Performance",
++  "تحلیل عملکرد": "Performance insights",
++  "فروش و سود": "Sales and profit",
++  "فروش و سود واقعی پس از بهای خرید و تخفیف، به میلیون تومان": "Actual sales and profit after purchase cost and discounts, in million toman",
++  "ترکیب دسته‌بندی": "Category mix",
++  "سهم از درآمد ماهانه": "Share of monthly revenue",
++  "تراکنش‌های اخیر": "Recent transactions",
++  "پرداخت‌های پیش‌رو": "Upcoming payments",
++  "مشاهده همه": "View all",
++  "فاکتور جدید": "New invoice",
++  "فروش امروز": "Today's sales",
++  "سود ثبت‌شده امروز": "Today's recorded profit",
++  "سود واقعی امروز": "Today's actual profit",
++  "درآمد ماه جاری": "Current month revenue",
++  "سفارش‌های در انتظار": "Pending orders",
++  "فاکتورهای صادرشده": "Issued invoices",
++  "موجودی انبار": "Inventory",
++  "سفارش‌های تسویه‌نشده": "Unsettled orders",
++  "مشتریان ثبت‌شده": "Registered customers",
++  "نیازمند پرداخت یا تکمیل": "Requires payment or completion",
++  "فروش منهای قیمت خرید و تخفیف": "Sales minus purchase cost and discounts",
++  "فروش منهای خرید و تخفیف": "Sales minus purchase cost and discounts",
++  "از دیتابیس کاربران": "From user database",
++  "واقعی": "Actual",
++  "زنده": "Live",
++  "جدید": "New",
++  "بدون تغییر": "No change",
++  "بازار زنده": "Live market",
++  "قیمت طلا": "Gold prices",
++  "خرید و فروش طلا": "Gold trading",
++  "نرخ ارز": "Exchange rates",
++  "وضعیت بازار": "Market status",
++  "بازار باز است": "Market is open",
++  "بازار بسته است": "Market is closed",
++  "روند فلزات گران‌بها": "Precious metals trend",
++  "پس از ثبت چند نرخ متوالی، نمودار روند در این بخش نمایش داده می‌شود.": "The trend chart appears after several consecutive market rates are recorded.",
++  "روزانه · ۱۸ عیار": "Daily · 18K",
++  "هفتگی · ۱۸ عیار": "Weekly · 18K",
++  "ساعت عقربه‌ای": "Analog clock",
++  "به‌روزرسانی": "Refresh",
++  "در حال دریافت اطلاعات واقعی…": "Loading live data…",
++  "داده‌ها از API و دیتابیس خوانده می‌شوند.": "Data is loaded from the API and database.",
++  "دریافت اطلاعات کامل نشد": "Could not load all data",
++  "تلاش دوباره": "Try again",
++  "فعال": "Active",
++  "غیرفعال": "Inactive",
++  "در انتظار": "Pending",
++  "در انتظار پرداخت": "Awaiting payment",
++  "بررسی پرداخت": "Payment review",
++  "پرداخت‌شده": "Paid",
++  "در حال پردازش": "Processing",
++  "تکمیل‌شده": "Completed",
++  "لغوشده": "Cancelled",
++  "بازپرداخت‌شده": "Refunded",
++  "صادرشده": "Issued",
++  "باطل‌شده": "Voided",
++  "تأییدشده": "Verified",
++  "نیازمند بررسی": "Requires review",
++  "ناموفق": "Failed",
++  "باز": "Open",
++  "تماس": "Call",
++  "پیام": "Message",
++  "جلسه": "Meeting",
++  "پیگیری": "Follow-up",
++  "یادداشت": "Note",
++  "مالک": "Owner",
++  "مدیر": "Admin",
++  "انصراف": "Cancel",
++  "در حال ثبت…": "Saving…",
++  "ثبت": "Save",
++  "حذف": "Delete",
++  "ویرایش": "Edit",
++  "مشاهده": "View",
++  "انتخاب کن": "Select",
++  "ثبت نشده": "Not recorded",
++  "بدون تصویر": "No image",
++  "بدون دسته": "Uncategorized",
++  "بدون دسته‌بندی": "Uncategorized",
++  "توضیحی ثبت نشده است.": "No description has been recorded.",
++  "هنوز مدلی ندارد": "No variants yet",
++  "افزودن مدل": "Add variant",
++  "تغییر تصویر": "Change image",
++  "افزودن تصویر": "Add image",
++  "محصول جدید": "New product",
++  "نام محصول": "Product name",
++  "شناسه لاتین": "URL slug",
++  "دسته‌بندی": "Category",
++  "تصویر محصول": "Product image",
++  "توضیحات": "Description",
++  "ثبت محصول و تصویر": "Save product and image",
++  "فایل تصویر": "Image file",
++  "متن جایگزین": "Alternative text",
++  "ذخیره تصویر": "Save image",
++  "کد کالا (SKU)": "SKU",
++  "نام مدل": "Variant name",
++  "عیار": "Karat",
++  "قیمت ثابت فروش (تومان)": "Fixed selling price (toman)",
++  "وزن کل (گرم)": "Gross weight (g)",
++  "وزن خالص طلا": "Net gold weight",
++  "وزن نگین": "Stone weight",
++  "وزن سایر مواد": "Other material weight",
++  "دارای نگین": "Has stone",
++  "وزن متغیر": "Variable weight",
++  "ثبت مدل و قیمت": "Save variant and price",
++  "انبار جدید": "New warehouse",
++  "کد انبار": "Warehouse code",
++  "نام انبار": "Warehouse name",
++  "ثبت انبار": "Save warehouse",
++  "موجودی اولیه / اصلاح": "Initial stock / correction",
++  "مدل کالا": "Product variant",
++  "تعداد": "Quantity",
++  "علت اصلاح": "Correction reason",
++  "ثبت موجودی": "Save stock",
++  "محصول / مدل": "Product / variant",
++  "موجودی": "Stock",
++  "رزرو": "Reserved",
++  "قابل فروش": "Available",
++  "میانگین قیمت خرید": "Average purchase price",
++  "سفارش جدید": "New order",
++  "ثبت پرداخت": "Record payment",
++  "روش پرداخت": "Payment method",
++  "نقدی": "Cash",
++  "کارت‌خوان": "POS",
++  "حواله بانکی": "Bank transfer",
++  "کارت‌به‌کارت": "Card to card",
++  "شماره پیگیری": "Reference number",
++  "ثبت پرداخت و صدور فاکتور": "Record payment and issue invoice",
++  "نشانی": "Address",
++  "کد/شناسه ملی مشتری": "Customer national ID",
++  "موجودی کالا": "Inventory item",
++  "تخفیف (تومان)": "Discount (toman)",
++  "هزینه ارسال (تومان)": "Shipping (toman)",
++  "ثبت سفارش": "Save order",
++  "دریافت تأییدشده": "Verified receipts",
++  "مطالبات سفارش‌ها": "Order receivables",
++  "پرداخت نیازمند بررسی": "Payments requiring review",
++  "شناسه": "ID",
++  "زمان تأیید": "Verification time",
++  "وضعیت": "Status",
++  "خریدهای ثبت‌شده": "Recorded purchases",
++  "جمع بهای خرید": "Total purchase cost",
++  "سود مورد انتظار": "Expected profit",
++  "سند خرید": "Purchase record",
++  "بهای تمام‌شده": "Cost basis",
++  "پیش از فروش و تخفیف": "Before sales and discounts",
++  "آخرین خریدها": "Recent purchases",
++  "سند": "Record",
++  "خرید واحد": "Unit purchase",
++  "فروش واحد": "Unit sale",
++  "تاریخ": "Date",
++  "تأمین‌کننده جدید": "New supplier",
++  "نام مجموعه": "Business name",
++  "مسئول تماس": "Contact person",
++  "تلفن": "Phone",
++  "ایمیل": "Email",
++  "شناسه ملی": "National ID",
++  "ثبت تأمین‌کننده": "Save supplier",
++  "خرید جدید": "New purchase",
++  "ثبت خرید": "Record purchase",
++  "زمان خرید": "Purchase date",
++  "تعداد خرید": "Purchase quantity",
++  "قیمت خرید هر واحد (تومان)": "Unit purchase price (toman)",
++  "قیمت فروش هر واحد (تومان)": "Unit selling price (toman)",
++  "شماره فاکتور تأمین‌کننده": "Supplier invoice number",
++  "ثبت خرید و قیمت فروش": "Save purchase and selling price",
++  "سود مورد انتظار این خرید": "Expected profit for this purchase",
++  "اختلاف قیمت فروش و خرید × تعداد": "Selling price minus purchase price × quantity",
++  "مرحله قبل": "Previous step",
++  "مرحله بعد": "Next step",
++  "تأیید و ثبت نهایی": "Confirm and save",
++  "انتخاب تأمین‌کننده": "Select supplier",
++  "انتخاب یا ساخت انبار": "Select or create warehouse",
++  "انتخاب یا ساخت محصول": "Select or create product",
++  "قیمت‌گذاری خرید": "Purchase pricing",
++  "تصویر و مشخصات": "Image and details",
++  "بررسی و تأیید": "Review and confirm",
++  "استفاده از محصول موجود": "Use existing product",
++  "ساخت محصول جدید": "Create new product",
++  "استفاده از انبار موجود": "Use existing warehouse",
++  "ساخت انبار جدید": "Create new warehouse",
++  "خلاصه خرید": "Purchase summary",
++  "ورود به مدیریت": "Management sign in",
++  "تأیید ورود دومرحله‌ای": "Two-factor verification",
++  "فعال‌سازی ورود امن": "Enable secure sign in",
++  "برای ادامه، اطلاعات حساب مدیریتی را وارد کن.": "Enter your management account details to continue.",
++  "ایمیل یا شماره تلفن": "Email or phone number",
++  "رمز عبور": "Password",
++  "نمایش رمز": "Show password",
++  "پنهان‌کردن رمز": "Hide password",
++  "ورود امن": "Secure sign in",
++  "تأیید و ورود": "Verify and sign in",
++  "تنظیم اتصال به سرور": "Server connection settings",
++  "ذخیره و آزمایش اتصال": "Save and test connection",
++  "در حال بازیابی نشست امن…": "Restoring secure session…",
++  "تأمین‌کنندگان و خرید": "Suppliers and purchasing",
++  "خرید را از تأمین‌کننده شروع کن؛ انبار، محصول، قیمت و تصویر در یک مسیر کوتاه ثبت می‌شوند.": "Start with a supplier, then add the warehouse, product, pricing and image in one short flow.",
++  "شروع خرید": "Start purchase",
++  "ابتدا تأمین‌کننده را ثبت کن؛ سپس ویزارد خرید خودکار باز می‌شود.": "Create a supplier first; the purchase wizard will then open automatically.",
++  "ثبت و شروع خرید": "Save and start purchase",
++  "تأمین‌کننده ثبت شد؛ حالا خرید را تکمیل کن.": "Supplier saved. Now complete the purchase.",
++  "ثبت خرید تأمین‌کننده": "Record supplier purchase",
++  "همه مراحل در همین پنجره انجام می‌شود؛ ثبت نهایی در مرحله آخر است.": "Complete every step here; nothing is submitted until the final step.",
++  "مراحل ثبت خرید": "Purchase steps",
++  "انبار موجود": "Existing warehouse",
++  "محصول موجود": "Existing product",
++  "قیمت و تعداد": "Quantity and pricing",
++  "تصویر و مشخصات تکمیلی": "Image and additional details",
++  "تأیید نهایی": "Final review",
++  "۱. تأمین‌کننده را انتخاب کن": "1. Select a supplier",
++  "شروع عملیات از تأمین‌کننده است؛ فقط تأمین‌کننده‌های فعال نمایش داده می‌شوند.": "The flow starts with a supplier; only active suppliers are shown.",
++  "تأمین‌کننده فعال وجود ندارد": "No active supplier",
++  "این پنجره را ببند و یک تأمین‌کننده جدید ثبت کن.": "Close this window and create a new supplier.",
++  "۲. انبار مقصد": "2. Destination warehouse",
++  "یک انبار موجود را انتخاب کن یا همین‌جا انبار جدید بساز.": "Select an existing warehouse or create a new one here.",
++  "۳. محصول و مدل": "3. Product and variant",
++  "می‌توانی محصول موجود را انتخاب کنی یا محصول جدید را در همین خرید بسازی.": "Select an existing product or create a new one as part of this purchase.",
++  "محصول و مدل": "Product and variant",
++  "کد SKU": "SKU",
++  "توضیحات محصول": "Product description",
++  "۴. تعداد و قیمت‌ها": "4. Quantity and prices",
++  "همه مبالغ این فرم و بخش‌های قابل مشاهده سامانه به تومان هستند.": "All amounts in this form and throughout the visible interface are in toman.",
++  "۵. تصویر و مشخصات تکمیلی": "5. Image and additional details",
++  "مشخصات محصول موجود حفظ می‌شود": "Existing product details will be preserved",
++  "تصویر و مشخصات قبلی تغییر نمی‌کنند؛ فقط خرید، موجودی و قیمت فروش ثبت می‌شود.": "The existing image and details stay unchanged; only the purchase, inventory and selling price are recorded.",
++  "تصویر اصلی و مشخصات طلا را پیش از تأیید نهایی اضافه کن.": "Add the primary image and gold details before final confirmation.",
++  "JPG، PNG یا WebP؛ حداکثر ۵ مگابایت": "JPG, PNG or WebP; up to 5 MB",
++  "وزن ناخالص (گرم)": "Gross weight (g)",
++  "وزن خالص طلا (گرم)": "Net gold weight (g)",
++  "وزن سنگ (گرم)": "Stone weight (g)",
++  "وزن سایر مواد (گرم)": "Other material weight (g)",
++  "دارای سنگ": "Has stones",
++  "۶. بررسی و تأیید": "6. Review and confirm",
++  "بعد از تأیید، خرید و همه موارد جدید به‌ترتیب ثبت می‌شوند.": "After confirmation, the purchase and all new resources are created in order.",
++  "قیمت خرید واحد": "Unit purchase price",
++  "قیمت فروش واحد": "Unit selling price",
++  "بهای کل خرید": "Total purchase cost",
++  "تأیید و ثبت خرید": "Confirm and save purchase",
++  "خرید تأیید شد؛ انبار، محصول، قیمت فروش و موجودی به‌روز شدند.": "Purchase confirmed; warehouse, product, selling price and inventory were updated.",
++  "یک تأمین‌کننده فعال انتخاب کن.": "Select an active supplier.",
++  "انبار مقصد را انتخاب کن.": "Select the destination warehouse.",
++  "کد و نام انبار جدید را وارد کن.": "Enter the new warehouse code and name.",
++  "محصول موجود را انتخاب کن.": "Select an existing product.",
++  "نام محصول، نام مدل و کد SKU را کامل کن.": "Complete the product name, variant name and SKU.",
++  "تعداد خرید باید یک عدد صحیح مثبت باشد.": "Purchase quantity must be a positive whole number.",
++  "قیمت خرید را به تومان و به‌صورت عدد صحیح وارد کن.": "Enter the purchase price in toman as a whole number.",
++  "قیمت فروش را به تومان و به‌صورت عدد صحیح وارد کن.": "Enter the selling price in toman as a whole number.",
++  "برای محصول جدید یک تصویر انتخاب کن.": "Select an image for the new product.",
++  "حجم تصویر نباید بیشتر از ۵ مگابایت باشد.": "The image must not exceed 5 MB.",
++  "عیار باید بین ۱ تا ۲۴ باشد.": "Karat must be between 1 and 24.",
++  "وزن ناخالص و وزن خالص باید بیشتر از صفر باشند.": "Gross and net weights must be greater than zero.",
++  "وزن خالص نمی‌تواند بیشتر از وزن ناخالص باشد.": "Net weight cannot exceed gross weight.",
++  "مرور فروش، سود و وضعیت عملیات امروز.": "Review today's sales, profit and operational status.",
++  "فاکتورهای صادرشده مستقیماً از سرویس صدور فاکتور خوانده می‌شوند.": "Issued invoices are loaded directly from the invoicing service.",
++  "از «فاکتور جدید» سفارش را بساز و پس از ثبت پرداخت، فاکتور خودکار صادر می‌شود.": "Create an order with New Invoice; the invoice is issued automatically after payment.",
++  "هنوز فاکتوری صادر نشده": "No invoices have been issued",
++  "اطلاعات تماس، نشانی و سابقه سفارش مشتریان در یک نمای واحد.": "Contact details, addresses and order history in one view.",
++  "ثبت مشتری و اطلاعات تماس او.": "Save a customer and their contact details.",
++  "اولین مشتری را با دکمه بالا ثبت کن؛ دادهٔ نمونه نمایش داده نمی‌شود.": "Create the first customer with the button above; no sample data is shown.",
++  "کاتالوگ، مدل‌ها، کد کالا و مشخصات تخصصی طلا.": "Catalog, variants, SKUs and detailed gold specifications.",
++  "ثبت محصول، مدل طلا و مشخصات قیمت‌گذاری.": "Create products, gold variants and pricing details.",
++  "محصول و تصویر آن را ثبت کن تا در انبار و سفارش قابل استفاده باشد.": "Create a product and image so it can be used in inventory and orders.",
++  "موجودی واقعی هر انبار، رزرو، قیمت خرید میانگین و مقدار قابل فروش.": "Actual warehouse stock, reservations, average purchase cost and available quantity.",
++  "ثبت رسید موجودی برای مدل‌های ثبت‌شده.": "Record inventory receipts for existing variants.",
++  "این فرم قیمت خرید ندارد و فقط برای ورود اولیه یا اصلاح فنی است. خرید واقعی را از صفحه تأمین‌کنندگان ثبت کن.": "This form has no purchase price and is only for initial stock or technical corrections. Record real purchases from Suppliers.",
++  "ابتدا انبار و مدل محصول را بساز، سپس خرید را از صفحه تأمین‌کنندگان ثبت کن.": "Create the warehouse and product variant, then record the purchase from Suppliers.",
++  "سفارش، رزرو موجودی، پرداخت و صدور فاکتور در یک گردش‌کار.": "Orders, inventory reservation, payment and invoice issuance in one workflow.",
++  "ساخت سفارش، تسویه و صدور فاکتور رسمی.": "Create an order, settle it and issue an official invoice.",
++  "مشتری و یکی از نشانی‌های ثبت‌شده او را انتخاب کن.": "Select a customer and one of their saved addresses.",
++  "ثبت پرداخت و صدور خودکار فاکتور.": "Record payment and issue an invoice automatically.",
++  "سفارش جدید، موجودی را رزرو می‌کند و بعد از تسویه فاکتور صادر می‌شود.": "A new order reserves inventory; its invoice is issued after settlement.",
++  "پرداخت‌های واقعی، وجوه وصول‌شده و مانده سفارش‌ها.": "Real payments, collected funds and outstanding order balances.",
++  "پرداخت‌های نقدی، کارت‌خوان و درگاه پس از ثبت اینجا دیده می‌شوند.": "Cash, POS and gateway payments appear here after they are recorded.",
++  "تماس‌ها، جلسات، یادداشت‌ها و پیگیری‌های آینده.": "Calls, meetings, notes and future follow-ups.",
++  "تماس یا پیگیری جدید را ثبت کن؛ اطلاعات ساختگی نمایش داده نمی‌شود.": "Record a call or follow-up; no sample data is displayed.",
++  "هویت فروشگاه، اتصال سرور و نشست‌های فعال.": "Store identity, server connection and active sessions.",
++  "اطلاعات حساب فعال، سطح دسترسی و وضعیت امنیتی این نشست.": "Active account details, access level and session security.",
++  "عبارت موردنظر را در نوار بالای برنامه وارد کن.": "Enter a search term in the top bar.",
++  "جست‌وجو در فاکتور، سفارش، محصول، مشتری و تأمین‌کننده انجام می‌شود.": "Search covers invoices, orders, products, customers and suppliers.",
++  "این صفحه پیدا نشد": "Page not found",
++  "از منوی کناری یکی از بخش‌های مدیریت را انتخاب کن.": "Choose a management section from the sidebar.",
++  "بازگشت به داشبورد": "Back to dashboard",
++  "نتایج جست‌وجو": "Search results",
++  "نتیجه‌ای پیدا نشد": "No results found",
++  "عبارتی وارد نشده": "No search term",
++  "شماره": "Number",
++  "اقلام": "Items",
++  "مبلغ": "Amount",
++  "روش": "Method",
++  "کد": "Code",
++  "نام": "Name",
++  "موضوع": "Subject",
++  "شرح": "Details",
++  "زمان پیگیری بعدی": "Next follow-up",
++  "تعامل جدید": "New interaction",
++  "تعامل‌ها": "Interactions",
++  "پیگیری باز": "Open follow-ups",
++  "نیازمند اقدام": "Needs action",
++  "همه رکوردها": "All records",
++  "تکمیل پیگیری": "Complete follow-up",
++  "ثبت تعامل": "Save interaction",
++  "مشخصات فروشگاه": "Store details",
++  "نام تجاری": "Trade name",
++  "نام حقوقی": "Legal name",
++  "کد اقتصادی": "Economic code",
++  "شماره ثبت": "Registration number",
++  "کد پستی": "Postal code",
++  "ذخیره تنظیمات": "Save settings",
++  "اتصال برنامه": "Application connection",
++  "آدرس API": "API address",
++  "میزبان": "Host",
++  "مرورگر": "Browser",
++  "ارتباط": "Connection",
++  "امن (HTTPS)": "Secure (HTTPS)",
++  "ناامن (HTTP)": "Insecure (HTTP)",
++  "نشست‌های ورود": "Sign-in sessions",
++  "این دستگاه": "This device",
++  "نشست دیگر": "Other session",
++  "تنظیمات حساب": "Account settings",
++  "مالک مجموعه": "Owner",
++  "مدیر مجموعه": "Administrator",
++  "کاربر": "User",
++  "حساب فعال": "Active account",
++  "ایمیل مدیریتی": "Management email",
++  "نقش‌ها": "Roles",
++  "ورود دومرحله‌ای": "Two-factor authentication",
++  "در انتظار فعال‌سازی": "Awaiting activation",
++  "نشست فعلی": "Current session",
++  "نشست امن فعال": "Secure session active",
++  "دسترسی‌های حساب": "Account permissions",
++  "مجوز فعال": "active permissions",
++  "MFA در انتظار": "MFA pending",
++  "MFA فعال": "MFA enabled",
++  "SKU ثبت‌شده": "Saved SKUs",
++  "آخرین فعالیت": "Last activity",
++  "آدرس API باید فقط شامل پروتکل، نام سرور و پورت باشد.": "The API address may only contain the protocol, host and port.",
++  "آدرس API معتبر نیست.": "The API address is not valid.",
++  "آدرس GoldInvoice.Api": "GoldInvoice.Api address",
++  "ابتدا آدرس API را ذخیره کن.": "Save the API address first.",
++  "ابتدا سفارش ساخته می‌شود؛ پس از ثبت پرداخت، فاکتور رسمی خودکار صادر خواهد شد.": "The order is created first; an official invoice is issued automatically after payment.",
++  "اتصال HTTP فقط برای توسعه یا شبکهٔ داخلی موقت مناسب است.": "HTTP is only suitable for development or a temporary internal network.",
++  "اتصال با API برقرار شد.": "Connected to the API.",
++  "ارتباط با API برقرار نشد. آدرس سرور و اجرای GoldInvoice.Api را بررسی کن.": "Could not connect to the API. Check the server address and make sure GoldInvoice.Api is running.",
++  "استان": "Province",
++  "استفاده از کد Authenticator": "Use authenticator code",
++  "استفاده از کد بازیابی": "Use recovery code",
++  "اصلاح اطلاعات چاپی فاکتور با سابقه حسابرسی ثبت شد.": "The printable invoice details were corrected and added to the audit trail.",
++  "افزودن نشانی دیگر": "Add another address",
++  "انبار جدید ثبت شد.": "New warehouse created.",
++  "انبار فعال": "Active warehouses",
++  "انتخاب مشتری": "Select customer",
++  "انتخاب نشانی": "Select address",
++  "انتخاب کالا": "Select item",
++  "این دلیل در سابقه حسابرسی باقی می‌ماند": "This reason remains in the audit trail",
++  "این قابلیت فقط داخل برنامهٔ دسکتاپ در دسترس است.": "This feature is only available in the desktop application.",
++  "این مشتری نشانی ندارد. از صفحه مشتریان برای او نشانی ثبت کن.": "This customer has no address. Add one from the Customers page.",
++  "بازگشت": "Back",
++  "بازگشت و اصلاح اطلاعات": "Back and edit details",
++  "بخشی از اطلاعات دریافت نشد:": "Some data could not be loaded:",
++  "بدون تلفن": "No phone",
++  "بدون فروش ماهانه": "No monthly sales",
++  "برای ثبت سفارش و Snapshot صحیح فاکتور، ابتدا مشخصات فروشگاه را ذخیره کن.": "Save the store details first so orders and invoice snapshots are correct.",
++  "برای محصول یک تصویر انتخاب کن.": "Select an image for the product.",
++  "برنامهٔ دسکتاپ نتوانست درخواست را انجام دهد.": "The desktop application could not complete the request.",
++  "بسته‌شده": "Closed",
++  "تأمین‌کننده در دیتابیس ثبت شد.": "Supplier saved to the database.",
++  "تأمین‌کننده‌ای ثبت نشده": "No suppliers found",
++  "تاریخ صدور": "Issue date",
++  "تحویل فاکتور به مشتری": "Deliver invoice to customer",
++  "تراکنشی ثبت نشده": "No transactions found",
++  "تسویه": "Settle",
++  "تسویه سفارش": "Settle order",
++  "تسویه‌نشده": "Unsettled",
++  "تصویر JPG، PNG یا WebP تا ۵ مگابایت الزامی است.": "A JPG, PNG or WebP image up to 5 MB is required.",
++  "تصویر محصول دریافت نشد.": "Product image was not received.",
++  "تصویر محصول ذخیره شد.": "Product image saved.",
++  "تعامل مشتری ثبت نشده": "No customer interactions found",
++  "تعامل مشتری و پیگیری آن ثبت شد.": "Customer interaction and follow-up saved.",
++  "تعداد نسخه": "Copies",
++  "تنظیمات اتصال هنوز آماده نیست.": "Connection settings are not ready yet.",
++  "تومان": "toman",
++  "توکن راه‌اندازی ورود دومرحله‌ای موجود نیست.": "The two-factor setup token is missing.",
++  "ثبت اصلاح فاکتور": "Save invoice correction",
++  "ثبت امن مشتری و اطلاعات تماس او.": "Securely save a customer and their contact details.",
++  "ثبت تعامل مشتری": "Save customer interaction",
++  "ثبت محصول": "Save product",
++  "ثبت مدیر": "Save administrator",
++  "ثبت مدیر جدید": "Create administrator",
++  "ثبت مشتری": "Save customer",
++  "ثبت مشتری جدید": "Create customer",
++  "ثبت نشانی": "Save address",
++  "حداقل ۱۲ کاراکتر، بزرگ/کوچک، عدد و علامت": "At least 12 characters with uppercase, lowercase, number and symbol",
++  "حذف نشانی": "Delete address",
++  "حساب": "Account",
++  "حساب قابل استفاده": "Usable account",
++  "حساب مالک فعلی باید دست‌کم در این لیست نمایش داده شود.": "The current owner account should appear in this list at minimum.",
++  "حساب مدیر ملزم به فعال‌سازی MFA است.": "Administrator accounts must enable MFA.",
++  "خانه / محل کار": "Home / work",
++  "خرید ارز": "Currency buy",
++  "خرید از تأمین‌کننده": "Purchase from supplier",
++  "خرید ثبت شد؛ موجودی، میانگین قیمت خرید و قیمت فروش به‌روز شدند.": "Purchase saved; inventory, average purchase cost and selling price were updated.",
++  "خرید طلای ۱۸": "18K gold buy",
++  "خطای نامشخص سرور": "Unknown server error",
++  "داده‌ای ثبت نشده است.": "No data has been recorded.",
++  "دارای سفارش": "With orders",
++  "دانلود PDF": "Download PDF",
++  "دانلود PDF از داخل نسخه دسکتاپ وندوم انجام می‌شود.": "PDF downloads are generated inside the Vendome desktop application.",
++  "در انتظار تسویه": "Awaiting settlement",
++  "در حال حذف…": "Deleting…",
++  "در حال دریافت…": "Loading…",
++  "در حال ذخیره…": "Saving…",
++  "در حال ساخت…": "Creating…",
++  "درآمد این ماه": "Revenue this month",
++  "درخواست انجام نشد؛ دوباره تلاش کن.": "The request failed; try again.",
++  "دریافت نشانی‌ها کامل نشد:": "Could not load addresses:",
++  "دلیل اصلاح": "Correction reason",
++  "دلیل چاپ / چاپ مجدد": "Print / reprint reason",
++  "دوست عزیز": "Dear customer",
++  "ذخیره ویرایش": "Save changes",
++  "رسید انبار ثبت و موجودی به‌روزرسانی شد.": "Inventory receipt saved and stock updated.",
++  "رفتن به تنظیمات": "Open settings",
++  "رمز موقت": "Temporary password",
++  "رکورد دیتابیس": "Database records",
++  "سابقه خرید": "Purchase history",
++  "ساخت انبار": "Create warehouse",
++  "ساختار کاتالوگ": "Catalog structure",
++  "سرور نتوانست این عملیات را انجام دهد.": "The server could not complete this operation.",
++  "سرور نتوانست درخواست را انجام دهد.": "The server could not complete the request.",
++  "سفارش ثبت و موجودی آن رزرو شد؛ حالا پرداخت را ثبت کن.": "Order saved and inventory reserved; now record the payment.",
++  "سفارش و فاکتور جدید": "New order and invoice",
++  "سفارشی ثبت نشده": "No orders found",
++  "سهم درآمد دسته‌بندی‌ها": "Revenue by category",
++  "سود": "Profit",
++  "شروع عملیات": "Start workflow",
++  "شماره تلفن": "Phone number",
++  "شهر": "City",
++  "طلای ۱۸ عیار": "18K gold",
++  "طلای ۲۴ عیار": "24K gold",
++  "عملیات کامل نشد.": "The operation could not be completed.",
++  "عنوان": "Title",
++  "غیرباطل": "Not voided",
++  "غیرلغوشده": "Not cancelled",
++  "فاکتور با موفقیت چاپ شد.": "Invoice printed successfully.",
++  "فاکتور جدید ثبت شد؛ اطلاعات داشبورد قابل به‌روزرسانی است.": "A new invoice was created; dashboard data can be refreshed.",
++  "فاکتور مستقیم به چاپگر پیش‌فرض ویندوز فرستاده می‌شود و نتیجه در سابقه چاپ ثبت خواهد شد.": "The invoice is sent directly to the default Windows printer and the result is added to print history.",
++  "فاکتور معتبر": "Valid invoices",
++  "فرایند ورود دومرحله‌ای منقضی شده است.": "The two-factor sign-in flow has expired.",
++  "فروش": "Sales",
++  "فروش ارز": "Currency sell",
++  "فروش سفارش‌ها": "Order sales",
++  "فروش طلای ۱۸": "18K gold sell",
++  "فروش، فاکتور، موجودی و قیمت بازار در یک فضای امن و یکپارچه؛ مخصوص مجموعهٔ وندوم.": "Sales, invoices, inventory and market prices in one secure workspace built for Vendome.",
++  "فعال‌سازی و ورود": "Enable and sign in",
++  "فیلتر دسته‌بندی فعال است.": "A category filter is active.",
++  "قبل از اولین سفارش، مشخصات فروشگاه را در تنظیمات کامل کن.": "Complete the store details in Settings before the first order.",
++  "قبل از ثبت سفارش، مشخصات فروشگاه را در تنظیمات کامل کن.": "Complete the store details in Settings before creating an order.",
++  "قطعه": "pieces",
++  "قیمت فروش این فرم، قیمت فعال فروشگاه برای مدل انتخاب‌شده می‌شود.": "The selling price entered here becomes the active store price for the selected variant.",
++  "مالک و مدیران سیستم از جدول امنیت و نقش‌ها خوانده می‌شوند.": "The owner and administrators are loaded from security roles.",
++  "مبالغ و اقلام قفل هستند؛ فقط اطلاعات چاپی با ثبت دلیل اصلاح می‌شوند.": "Amounts and items are locked; only printable details can be changed with an audit reason.",
++  "مبلغ کل": "Total amount",
++  "متصل به مشتری": "Linked to customer",
++  "مثلاً gold-ring-001": "For example, gold-ring-001",
++  "محصول و تصویر آن ثبت شد؛ حالا مدل کالا را اضافه کن.": "Product and image saved; now add a variant.",
++  "محصولات پرفروش": "Best-selling products",
++  "محصولی یافت نشد": "No products found",
++  "محل نگهداری": "Storage location",
++  "مدل اصلی": "Main variant",
++  "مدل محصول و قیمت فروش آن ثبت شد.": "Product variant and selling price saved.",
++  "مدیر جدید": "New administrator",
++  "مدیریت دقیق، درخشش ماندگار": "Precise management, lasting brilliance",
++  "مرورگر اجازه بازکردن پیش‌نمایش چاپ را نداد.": "The browser blocked the print preview.",
++  "مشاهده فاکتور": "View invoice",
++  "مشاهده محصولات": "View products",
++  "مشاهده نشانی": "View address",
++  "مشاهده گزارش": "View report",
++  "مشتری با شماره تلفن یکتا ثبت می‌شود و ایمیل لازم نیست.": "Customers are saved with a unique phone number; email is optional.",
++  "مشتری ثبت نشده": "No customers found",
++  "مشتری ثبت‌شده": "Registered customers",
++  "مشتری جدید": "New customer",
++  "مشتری جدید با شماره تلفن ثبت شد.": "New customer saved with a phone number.",
++  "مشتری فعال": "Active customers",
++  "مشتری، نشانی یا موجودی انتخاب‌شده دیگر در دسترس نیست؛ اطلاعات صفحه را به‌روزرسانی کن.": "The selected customer, address or inventory item is no longer available; refresh the page.",
++  "مشتریان فعال": "Active customers",
++  "مشخصات فروشگاه ذخیره شد.": "Store details saved.",
++  "مشخصات فروشگاه هنوز کامل نشده است": "Store details are incomplete",
++  "موجودی انبار تغییر کرد؛ دادهٔ تازه از API دریافت می‌شود.": "Inventory changed; fresh data is being loaded from the API.",
++  "موجودی انتخاب‌شده معتبر یا کافی نیست؛ صفحه را به‌روزرسانی کن.": "The selected inventory item is invalid or insufficient; refresh the page.",
++  "موجودی اولیه / اصلاح شمارش": "Initial stock / count correction",
++  "موجودی ثبت نشده": "No inventory found",
++  "موجودی قابل فروش": "Available inventory",
++  "موجودی کل": "Total inventory",
++  "میلیون تومان": "million toman",
++  "نام تحویل‌گیرنده": "Recipient name",
++  "نام مشتری": "Customer name",
++  "نام و نام خانوادگی": "Full name",
++  "نام کامل": "Full name",
++  "نرخ معتبر جدید بازار ثبت شد.": "A new validated market price was recorded.",
++  "نرخی ثبت نشده": "No rate recorded",
++  "نشانی دیگر": "Another address",
++  "نشانی فعالی برای این مشتری پیدا نشد؛ یک نشانی جدید ثبت کن.": "No active address was found for this customer; add a new address.",
++  "نشانی مشتری ثبت شد.": "Customer address saved.",
++  "نشانی مشتری حذف شد.": "Customer address deleted.",
++  "نشانی مشتری ویرایش شد.": "Customer address updated.",
++  "نشانی پیش‌فرض": "Default address",
++  "نشانی کامل": "Full address",
++  "نشست ذخیره‌شده‌ای وجود ندارد.": "No saved session exists.",
++  "نشست رمزگذاری‌شده · اتصال مستقیم به API داخلی": "Encrypted session · Direct connection to the internal API",
++  "نمایش همه محصولات": "Show all products",
++  "نمایی آرام از مِزون؛ معاملات امروز، روند این ماه و آنچه منتظر امضای شماست.": "A calm view of the maison: today's transactions, this month's trend and items awaiting your approval.",
++  "نمودار فروش و سود هفت ماه گذشته": "Sales and profit over the last seven months",
++  "نوع": "Type",
++  "هر کد فقط یک‌بار قابل استفاده است. بعد از بستن این صفحه دوباره نمایش داده نمی‌شوند.": "Each code can only be used once and will not be shown again after this page is closed.",
++  "همه دوره‌ها": "All periods",
++  "همه وضعیت‌ها": "All statuses",
++  "ورود به انبار": "Inventory receipt",
++  "وضعیت سفارش‌ها": "Order status",
++  "وضعیت یکی از سفارش‌ها تغییر کرد.": "An order status changed.",
++  "وندوم": "Vendome",
++  "ویرایش اطلاعات": "Edit details",
++  "ویرایش اطلاعات چاپی": "Edit printable details",
++  "ویرایش نشانی": "Edit address",
++  "پاسخ برنامهٔ دسکتاپ بیش از حد طول کشید.": "The desktop application took too long to respond.",
++  "پرداخت تأیید و فاکتور صادر شد؛ پیش‌نمایش فاکتور باز شد.": "Payment confirmed and invoice issued; the preview has opened.",
++  "پرداخت ثبت شد.": "Payment saved.",
++  "پس از رزرو": "After reservation",
++  "پیش‌نمایش نسخه آمادهٔ PDF و چاپ": "Preview the PDF and print-ready version",
++  "پیگیری تکمیل شد.": "Follow-up completed.",
++  "پیگیری مالی": "Financial follow-up",
++  "چاپ فاکتور": "Print invoice",
++  "چاپ فاکتور کامل نشد.": "Invoice printing could not be completed.",
++  "چاپ مجدد فاکتور با موفقیت ثبت شد.": "Invoice reprint recorded successfully.",
++  "چاپ مستقیم فاکتور": "Direct invoice printing",
++  "چاپ مستقیم فقط داخل برنامه دسکتاپ وندوم در دسترس است.": "Direct printing is only available in the Vendome desktop application.",
++  "چاپگر پیش‌فرض ویندوز در دسترس نیست؛ چاپگر را در تنظیمات Windows فعال یا پیش‌فرض کن.": "The default Windows printer is unavailable; enable a printer or set it as default in Windows Settings.",
++  "کاربر وندوم": "Vendome user",
++  "کارمند مدیر ثبت شد؛ در اولین ورود باید MFA را فعال کند.": "Administrator created; MFA must be enabled at first sign-in.",
++  "کارمندی یافت نشد": "No employees found",
++  "کالای اصلی": "Main item",
++  "کالای جدید": "New item",
++  "کد Authenticator": "Authenticator code",
++  "کد بازیابی": "Recovery code",
++  "کد برنامهٔ Authenticator یا کد بازیابی را وارد کن.": "Enter an authenticator or recovery code.",
++  "کد شش‌رقمی Authenticator": "Six-digit authenticator code",
++  "کدها را امن ذخیره کردم": "I saved the codes securely",
++  "کدهای بازیابی را همین حالا ذخیره کن": "Save your recovery codes now",
++  "کل سفارش‌ها": "Total orders",
++  "کل فاکتورها": "Total invoices",
++  "کلید را در Authenticator ثبت کن و کد شش‌رقمی را بنویس.": "Add the key to your authenticator and enter the six-digit code.",
++  "کلید راه‌اندازی": "Setup key",
++  "کپی شد": "Copied",
++  "کپی همهٔ کدها": "Copy all codes",
++  "کپی کلید": "Copy key",
++  "گالری وندوم": "Vendome gallery",
++  "گزارش روز": "Daily report",
++  "ابتدا تأمین‌کننده را ثبت کن و سپس خرید کالا را از همان ردیف انجام بده.": "Create a supplier first, then record a purchase from its row.",
++  "باز ۰۹:۰۰ · بسته ۱۷:۰۰": "Open 09:00 · Close 17:00",
++  "ثبت تعداد خرید، قیمت خرید و قیمت فروش دستی؛ اختلاف قیمت به‌عنوان سود واقعی فاکتور محاسبه می‌شود.": "Record purchase quantity and purchase/selling prices; their difference is used as actual invoice profit.",
++  "ثبت تعداد، قیمت خرید و قیمت فروش دستی.": "Record quantity and manual purchase and selling prices.",
++  "سلام،": "Hello,",
++  "پیگیری:": "Follow-up:",
++  "گزارش عملیاتی بر پایه داده‌های فاکتور، سفارش، کالا و انبار.": "Operational reporting based on invoice, order, product and inventory data.",
++  "یک تصویر انتخاب کن.": "Select an image.",
++  "یک تغییر جدید از سرور دریافت شد.": "A new update was received from the server.",
++  "۱ مشتری": "1 Customer",
++  "۲ کالا و موجودی": "2 Item and inventory",
++  "۳ پرداخت": "3 Payment",
++  "۴ فاکتور": "4 Invoice",
++  "— موجودی": "— Stock",
++};
++
++const dynamicTranslations: Array<[RegExp, string]> = [
++  [/^سلام،\s*(.+)$/u, "Hello, $1"],
++  [/^ثبت خرید از\s+(.+)$/u, "Record purchase from $1"],
++  [/^مدل جدید برای\s+(.+)$/u, "New variant for $1"],
++  [/^تصویر\s+(.+)$/u, "$1 image"],
++  [/^تسویه\s+(.+)$/u, "Settle $1"],
++  [/^فاکتور\s+(.+)$/u, "Invoice $1"],
++  [/^سفارش\s+(.+)$/u, "Order $1"],
++  [/^مبلغ قابل پرداخت:\s*(.+)$/u, "Amount due: $1"],
++  [/^(.+)\s+تومان$/u, "$1 toman"],
++  [/^(.+)\s+فاکتور$/u, "$1 invoices"],
++  [/^(.+)\s+محصول$/u, "$1 products"],
++  [/^(.+)\s+مشتری$/u, "$1 customers"],
++  [/^(.+)\s+سفارش$/u, "$1 orders"],
++  [/^(.+)\s+قطعه$/u, "$1 pieces"],
++  [/^(.+)\s+پرداخت$/u, "$1 payments"],
++  [/^موجودی\s+(.+)$/u, "Stock $1"],
++  [/^پیگیری:\s*(.+)$/u, "Follow-up: $1"],
++];
++
++function translateText(value: string): string {
++  const match = value.match(/^(\s*)(.*?)(\s*)$/s);
++  if (!match) return value;
++  const [, prefix, content, suffix] = match;
++  const normalizedDigits = content
++    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
++    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
++  const exact = translations[content];
++  if (exact) return `${prefix}${exact}${suffix}`;
++  for (const [pattern, replacement] of dynamicTranslations) {
++    if (pattern.test(content)) return `${prefix}${normalizedDigits.replace(pattern, replacement)}${suffix}`;
++  }
++  return normalizedDigits === content ? value : `${prefix}${normalizedDigits}${suffix}`;
++}
++
++function shouldSkip(node: Node): boolean {
++  const parent = node instanceof Element ? node : node.parentElement;
++  return Boolean(parent?.closest("script, style, code, pre, [data-no-translate]"));
++}
++
++function TranslationBridge({ language }: { language: AppLanguage }) {
++  const originalTexts = useRef(new Map<Text, string>());
++  const originalAttributes = useRef(new Map<Element, Map<string, string>>());
++
++  useEffect(() => {
++    if (language !== "en") return;
++    let applying = false;
++    const attributes = ["aria-label", "placeholder", "title"];
++
++    const translateNode = (root: Node) => {
++      if (shouldSkip(root)) return;
++      applying = true;
++      try {
++        if (root.nodeType === Node.TEXT_NODE) {
++          const text = root as Text;
++          const translated = translateText(text.data);
++          if (translated !== text.data) {
++            originalTexts.current.set(text, text.data);
++            text.data = translated;
++          }
++          return;
++        }
++
++        if (root instanceof Element) {
++          for (const attribute of attributes) {
++            const value = root.getAttribute(attribute);
++            if (!value) continue;
++            const translated = translateText(value);
++            if (translated === value) continue;
++            const originals = originalAttributes.current.get(root) ?? new Map<string, string>();
++            originals.set(attribute, value);
++            originalAttributes.current.set(root, originals);
++            root.setAttribute(attribute, translated);
++          }
++        }
++
++        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
++        let current = walker.nextNode();
++        while (current) {
++          if (!shouldSkip(current)) {
++            if (current.nodeType === Node.TEXT_NODE) {
++              const text = current as Text;
++              const translated = translateText(text.data);
++              if (translated !== text.data) {
++                originalTexts.current.set(text, text.data);
++                text.data = translated;
++              }
++            } else if (current instanceof Element) {
++              for (const attribute of attributes) {
++                const value = current.getAttribute(attribute);
++                if (!value) continue;
++                const translated = translateText(value);
++                if (translated === value) continue;
++                const originals = originalAttributes.current.get(current) ?? new Map<string, string>();
++                originals.set(attribute, value);
++                originalAttributes.current.set(current, originals);
++                current.setAttribute(attribute, translated);
++              }
++            }
++          }
++          current = walker.nextNode();
++        }
++      } finally {
++        applying = false;
++      }
++    };
++
++    translateNode(document.body);
++    const observer = new MutationObserver((mutations) => {
++      if (applying) return;
++      for (const mutation of mutations) {
++        if (mutation.type === "characterData") translateNode(mutation.target);
++        mutation.addedNodes.forEach(translateNode);
++      }
++    });
++    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
++
++    return () => {
++      observer.disconnect();
++      applying = true;
++      originalTexts.current.forEach((value, node) => {
++        if (node.isConnected) node.data = value;
++      });
++      originalAttributes.current.forEach((values, element) => {
++        if (!element.isConnected) return;
++        values.forEach((value, attribute) => element.setAttribute(attribute, value));
++      });
++      originalTexts.current.clear();
++      originalAttributes.current.clear();
++      applying = false;
++    };
++  }, [language]);
++
++  return null;
++}
++
++function initialLanguage(): AppLanguage {
++  const language = window.localStorage.getItem(STORAGE_KEY) === "en" ? "en" : "fa";
++  applyDocumentLanguage(language);
++  return language;
++}
++
++function applyDocumentLanguage(language: AppLanguage) {
++  document.documentElement.lang = language;
++  document.documentElement.dir = language === "fa" ? "rtl" : "ltr";
++  document.documentElement.dataset.locale = language;
++}
++
++export function LocaleProvider({ children }: PropsWithChildren) {
++  const [language, setLanguage] = useState<AppLanguage>(initialLanguage);
++
++  useEffect(() => {
++    window.localStorage.setItem(STORAGE_KEY, language);
++    applyDocumentLanguage(language);
++  }, [language]);
++
++  const value = useMemo<LocaleContextValue>(() => ({
++    language,
++    direction: language === "fa" ? "rtl" : "ltr",
++    locale: language === "fa" ? "fa-IR" : "en-US",
++    setLanguage: (nextLanguage) => {
++      applyDocumentLanguage(nextLanguage);
++      setLanguage(nextLanguage);
++    },
++    toggleLanguage: () => setLanguage((current) => {
++      const nextLanguage = current === "fa" ? "en" : "fa";
++      applyDocumentLanguage(nextLanguage);
++      return nextLanguage;
++    }),
++  }), [language]);
++
++  return (
++    <LocaleContext.Provider value={value}>
++      {children}
++      <TranslationBridge language={language} />
++    </LocaleContext.Provider>
++  );
++}
++
++export function useLocale(): LocaleContextValue {
++  const value = useContext(LocaleContext);
++  if (!value) throw new Error("useLocale must be used inside LocaleProvider.");
++  return value;
++}
+diff --git a/GoldInvoice.Client/src/lib/money.ts b/GoldInvoice.Client/src/lib/money.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f62ca1dd3b83f78374b0185deb2424b4d42ec358
+--- /dev/null
++++ b/GoldInvoice.Client/src/lib/money.ts
+@@ -0,0 +1,22 @@
++export const RIALS_PER_TOMAN = 10;
++
++export function tomansToRials(value: number): number {
++  if (!Number.isFinite(value)) throw new TypeError("A finite toman amount is required.");
++  const rials = value * RIALS_PER_TOMAN;
++  if (!Number.isSafeInteger(rials)) throw new RangeError("The amount is outside the supported range.");
++  return rials;
++}
++
++export function rialsToTomans(value: number): number {
++  return value / RIALS_PER_TOMAN;
++}
++
++export function activeNumberLocale(): "fa-IR" | "en-US" {
++  return document.documentElement.lang === "en" ? "en-US" : "fa-IR";
++}
++
++export function formatTomansFromRials(value: number): string {
++  const locale = activeNumberLocale();
++  const amount = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(rialsToTomans(value));
++  return `${amount} ${locale === "fa-IR" ? "تومان" : "toman"}`;
++}
+diff --git a/GoldInvoice.Client/src/main.tsx b/GoldInvoice.Client/src/main.tsx
+index 093cb8e1d229cbdf0997d156285c4fa5e565abe4..6e642e57829890dd31e4daa0a013e3def8516fbb 100644
+--- a/GoldInvoice.Client/src/main.tsx
++++ b/GoldInvoice.Client/src/main.tsx
+@@ -1,6 +1,11 @@
+ import "@fontsource/eb-garamond/latin-400.css";
+ import "@fontsource/eb-garamond/latin-500.css";
+ import "@fontsource/eb-garamond/latin-700.css";
++import "@fontsource/vazirmatn/latin-300.css";
++import "@fontsource/vazirmatn/latin-400.css";
++import "@fontsource/vazirmatn/latin-500.css";
++import "@fontsource/vazirmatn/latin-600.css";
++import "@fontsource/vazirmatn/latin-700.css";
+ import "@fontsource/vazirmatn/arabic-300.css";
+ import "@fontsource/vazirmatn/arabic-400.css";
+ import "@fontsource/vazirmatn/arabic-500.css";
+@@ -9,10 +14,13 @@ import "@fontsource/vazirmatn/arabic-700.css";
+ import { createRoot } from "react-dom/client";
+ import { App } from "./app/App";
+ import { AuthenticationProvider } from "./features/auth/AuthContext";
++import { LocaleProvider } from "./i18n/LocaleContext";
+ import "./styles.css";
+ 
+ createRoot(document.getElementById("root")!).render(
+-  <AuthenticationProvider>
+-    <App />
+-  </AuthenticationProvider>,
++  <LocaleProvider>
++    <AuthenticationProvider>
++      <App />
++    </AuthenticationProvider>
++  </LocaleProvider>,
+ );
+diff --git a/GoldInvoice.Client/src/styles.css b/GoldInvoice.Client/src/styles.css
+index 43e9ad984a53d7999d72c5bcf885fc096af48317..539e18f38792026a03f1033b7b360c7b801487ba 100644
+--- a/GoldInvoice.Client/src/styles.css
++++ b/GoldInvoice.Client/src/styles.css
+@@ -84,6 +84,21 @@ body {
+   -webkit-font-smoothing: antialiased;
+ }
+ 
++/* Vazirmatn's latin subset keeps Persian and Latin digits visually consistent. */
++.metric-value,
++.module-metric strong,
++.market-value-wrap strong,
++.amount,
++.numeric,
++.numeric-cell,
++input[type="number"],
++input[type="datetime-local"] {
++  font-family: "Vazirmatn", sans-serif;
++  font-variant-numeric: tabular-nums;
++  font-weight: 600;
++  letter-spacing: -0.025em;
++}
++
+ button,
+ input,
+ select,
+@@ -225,8 +240,8 @@ textarea:focus-visible {
+ .module-metric strong {
+   display: block;
+   margin: 9px 0 5px;
+-  font-size: clamp(18px, 1.8vw, 25px);
+-  font-weight: 600;
++  font-size: clamp(16px, 1.45vw, 21px);
++  font-weight: 700;
+ }
+ 
+ .table-card {
+@@ -535,6 +550,299 @@ textarea:focus-visible {
+   overflow: hidden;
+ }
+ 
++.modal-card:has(.purchase-wizard) {
++  width: min(940px, 100%);
++}
++
++.purchase-wizard {
++  display: grid;
++  gap: 18px;
++}
++
++.wizard-steps {
++  display: grid;
++  grid-template-columns: repeat(6, minmax(0, 1fr));
++  margin: 0;
++  padding: 0;
++  gap: 5px;
++  list-style: none;
++}
++
++.wizard-steps li {
++  position: relative;
++  min-width: 0;
++}
++
++.wizard-steps li:not(:last-child)::after {
++  position: absolute;
++  top: 15px;
++  right: calc(50% + 17px);
++  left: calc(-50% + 17px);
++  height: 1px;
++  content: "";
++  background: var(--border);
++}
++
++.wizard-steps li.is-complete:not(:last-child)::after {
++  background: color-mix(in oklch, var(--success) 55%, var(--border));
++}
++
++.wizard-steps button {
++  position: relative;
++  z-index: 1;
++  display: grid;
++  width: 100%;
++  justify-items: center;
++  padding: 0;
++  gap: 6px;
++  color: var(--muted-foreground);
++  background: transparent;
++  border: 0;
++}
++
++.wizard-steps button > span {
++  display: grid;
++  width: 31px;
++  height: 31px;
++  place-items: center;
++  background: var(--background);
++  border: 1px solid var(--border);
++  border-radius: 50%;
++  font-size: 10px;
++  font-weight: 700;
++}
++
++.wizard-steps button small {
++  max-width: 100%;
++  font-size: 8px;
++  text-align: center;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  overflow: hidden;
++}
++
++.wizard-steps .is-current button,
++.wizard-steps .is-complete button {
++  color: var(--foreground);
++}
++
++.wizard-steps .is-current button > span {
++  color: var(--navy-ink);
++  background: var(--navy);
++  border-color: var(--navy);
++  box-shadow: 0 0 0 4px color-mix(in oklch, var(--navy) 10%, transparent);
++}
++
++.wizard-steps .is-complete button > span {
++  color: white;
++  background: var(--success);
++  border-color: var(--success);
++  cursor: pointer;
++}
++
++.wizard-panel {
++  min-height: 330px;
++  padding: 20px;
++  background: color-mix(in oklch, var(--background) 68%, var(--card));
++  border: 1px solid var(--border);
++  border-radius: 12px;
++}
++
++.wizard-panel section > h3 {
++  margin: 0 0 4px;
++  font-size: 16px;
++}
++
++.wizard-panel section > p {
++  margin: 0 0 18px;
++  color: var(--muted-foreground);
++  font-size: 10px;
++}
++
++.wizard-panel > section > .form-field {
++  max-width: 520px;
++}
++
++.wizard-mode-switch {
++  display: flex;
++  flex-wrap: wrap;
++  margin-bottom: 18px;
++  gap: 8px;
++}
++
++.wizard-mode-switch button {
++  display: inline-flex;
++  min-height: 40px;
++  align-items: center;
++  padding: 0 14px;
++  gap: 7px;
++  color: var(--muted-foreground);
++  background: var(--card);
++  border: 1px solid var(--border);
++  border-radius: 9px;
++  font-size: 10px;
++  cursor: pointer;
++}
++
++.wizard-mode-switch button.is-active {
++  color: var(--foreground);
++  background: color-mix(in oklch, var(--gold) 10%, var(--card));
++  border-color: color-mix(in oklch, var(--gold) 55%, var(--border));
++}
++
++.checkbox-field {
++  display: flex;
++  min-height: 42px;
++  align-items: center;
++  padding: 8px 11px;
++  gap: 8px;
++  background: var(--background);
++  border: 1px solid var(--border);
++  border-radius: 9px;
++  font-size: 10px;
++}
++
++.wizard-existing-summary {
++  display: flex;
++  min-height: 105px;
++  align-items: center;
++  padding: 18px;
++  gap: 13px;
++  color: var(--success);
++  background: color-mix(in oklch, var(--success) 8%, var(--card));
++  border: 1px solid color-mix(in oklch, var(--success) 25%, var(--border));
++  border-radius: 11px;
++}
++
++.wizard-existing-summary p {
++  margin: 4px 0 0;
++  color: var(--muted-foreground);
++  font-size: 10px;
++}
++
++.wizard-review {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  margin: 0;
++  gap: 1px;
++  overflow: hidden;
++  border: 1px solid var(--border);
++  border-radius: 10px;
++}
++
++.wizard-review > div {
++  display: flex;
++  min-height: 54px;
++  align-items: center;
++  justify-content: space-between;
++  padding: 11px 13px;
++  gap: 12px;
++  background: var(--card);
++  border-bottom: 1px solid var(--border);
++}
++
++.wizard-review dt {
++  color: var(--muted-foreground);
++  font-size: 9px;
++}
++
++.wizard-review dd {
++  margin: 0;
++  font-size: 11px;
++  font-weight: 600;
++  text-align: end;
++}
++
++.wizard-actions {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  padding-top: 3px;
++  gap: 10px;
++}
++
++.language-button {
++  display: inline-flex;
++  width: auto;
++  min-width: 58px;
++  grid-auto-flow: column;
++  padding: 0 8px;
++  gap: 5px;
++}
++
++.language-button span {
++  font-family: "Vazirmatn", sans-serif;
++  font-size: 9px;
++  font-weight: 700;
++}
++
++.auth-language-button {
++  position: fixed;
++  top: 20px;
++  right: 24px;
++  z-index: 10;
++  display: inline-flex;
++  min-height: 38px;
++  align-items: center;
++  padding: 0 13px;
++  gap: 7px;
++  color: var(--foreground);
++  background: color-mix(in oklch, var(--card) 90%, transparent);
++  border: 1px solid var(--border);
++  border-radius: 9px;
++  box-shadow: var(--shadow-card);
++  font-size: 10px;
++  font-weight: 600;
++  cursor: pointer;
++}
++
++html[data-locale="en"] body,
++html[data-locale="en"] .module-main,
++html[data-locale="en"] .dashboard-main,
++html[data-locale="en"] .sidebar nav,
++html[data-locale="en"] .sidebar-label,
++html[data-locale="en"] .sidebar-footer,
++html[data-locale="en"] .market-rail,
++html[data-locale="en"] .modal-layer,
++html[data-locale="en"] .quick-card,
++html[data-locale="en"] .insights-grid,
++html[data-locale="en"] .auth-form-panel,
++html[data-locale="en"] .auth-brand-content,
++html[data-locale="en"] .toast {
++  direction: ltr;
++}
++
++html[data-locale="en"] .data-table {
++  text-align: left;
++}
++
++html[data-locale="en"] .global-search input {
++  direction: ltr;
++}
++
++html[data-locale="en"] .profile-button,
++html[data-locale="en"] .profile-menu {
++  direction: ltr;
++}
++
++html[data-locale="en"] .quick-card {
++  text-align: left;
++}
++
++html[data-locale="en"] .auth-brand-content {
++  text-align: left;
++}
++
++html[data-locale="en"] .auth-brand-rule {
++  margin-right: auto;
++  margin-left: 0;
++}
++
++html[data-locale="en"] .auth-language-button {
++  right: auto;
++  left: 24px;
++}
++
+ .modal-card > header {
+   display: flex;
+   align-items: flex-start;
+@@ -1647,8 +1955,8 @@ textarea:focus-visible {
+   margin: 0 0 13px;
+   color: var(--foreground);
+   font-family: "Vazirmatn", "EB Garamond", serif;
+-  font-size: clamp(1.25rem, 1.75vw, 1.72rem);
+-  font-weight: 400;
++  font-size: clamp(1.05rem, 1.35vw, 1.35rem);
++  font-weight: 700;
+   line-height: 1.25;
+   letter-spacing: -0.04em;
+   white-space: nowrap;
+@@ -2193,7 +2501,7 @@ textarea:focus-visible {
+   }
+ 
+   .metric-value {
+-    font-size: 1.55rem;
++    font-size: 1.22rem;
+   }
+ 
+   .insights-grid {
+@@ -3390,3 +3698,51 @@ textarea:focus-visible {
+     grid-template-columns: 1fr;
+   }
+ }
++
++@media (max-width: 767px) {
++  .wizard-steps {
++    grid-template-columns: repeat(6, minmax(88px, 1fr));
++    padding-bottom: 8px;
++    overflow-x: auto;
++  }
++
++  .wizard-steps li:not(:last-child)::after {
++    display: none;
++  }
++
++  .wizard-panel {
++    min-height: 300px;
++    padding: 15px;
++  }
++
++  .wizard-review {
++    grid-template-columns: 1fr;
++  }
++
++  .wizard-actions {
++    align-items: stretch;
++  }
++
++  .wizard-actions > button {
++    flex: 1;
++  }
++
++  .language-button {
++    min-width: 36px;
++    padding: 0;
++  }
++
++  .language-button span {
++    display: none;
++  }
++
++  .auth-language-button {
++    top: 12px;
++    right: 14px;
++  }
++
++  html[data-locale="en"] .auth-language-button {
++    right: auto;
++    left: 14px;
++  }
++}

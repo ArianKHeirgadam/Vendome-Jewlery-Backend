@@ -1,3 +1,5 @@
+using GoldInvoice.Api.Market;
+using GoldInvoice.Application.Pricing;
 using GoldInvoice.Api;
 using GoldInvoice.Api.Configuration;
 using GoldInvoice.Api.Integration;
@@ -53,6 +55,7 @@ builder.Services.AddSwaggerGen(options =>
 });
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<IMarketPriceProvider, NavasanMarketPriceProvider>();
 builder.Services.AddSingleton<IIntegrationEventHandler, SignalRIntegrationEventHandler>();
 builder.Services.AddSecurityInfrastructure(builder.Configuration);
 builder.Services.AddApiFoundation(builder.Configuration);

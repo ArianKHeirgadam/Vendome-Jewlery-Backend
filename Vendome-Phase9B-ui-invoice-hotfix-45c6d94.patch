@@ -1,0 +1,143 @@
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index b019008..f9c0ce1 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -9,6 +9,25 @@ function messageOf(error: unknown): string {
+   return error instanceof Error ? error.message : "عملیات کامل نشد.";
+ }
+ 
++function invoiceWithCurrentStore(invoice: Invoice, storeProfile: StoreProfile | null): Invoice {
++  if (!storeProfile) return invoice;
++
++  return {
++    ...invoice,
++    store: {
++      id: invoice.store?.id ?? "current-store-profile",
++      tradeName: storeProfile.tradeName,
++      legalName: storeProfile.legalName,
++      nationalId: storeProfile.nationalId,
++      economicCode: storeProfile.economicCode,
++      registrationNumber: storeProfile.registrationNumber,
++      phoneNumber: storeProfile.phoneNumber,
++      postalCode: storeProfile.postalCode,
++      addressLine: storeProfile.addressLine,
++    },
++  };
++}
++
+ function numberValue(form: FormData, name: string): number {
+   return Number(form.get(name) || 0);
+ }
+@@ -34,12 +53,14 @@ function textValue(form: FormData, name: string): string {
+     action: "preview" | "save" | "print",
+     copies = 1,
+   ) => {
++    const documentInvoice = invoiceWithCurrentStore(invoice, data.storeProfile);
++
+     if (!isDesktopHost()) {
+       if (action === "print") {
+         const preview = window.open("", "_blank", "noopener,noreferrer");
+         if (!preview) throw new Error("مرورگر اجازه بازکردن پیش‌نمایش چاپ را نداد.");
+         preview.document.open();
+-        preview.document.write(buildInvoiceDocumentHtml(invoice));
++        preview.document.write(buildInvoiceDocumentHtml(documentInvoice));
+         preview.document.close();
+         preview.focus();
+         preview.print();
+@@ -50,7 +71,7 @@ function textValue(form: FormData, name: string): string {
+ 
+     return sendDesktopCommand<InvoiceDesktopResult>("invoice.document", {
+       action,
+-      html: buildInvoiceDocumentHtml(invoice),
++      html: buildInvoiceDocumentHtml(documentInvoice),
+       suggestedFileName: invoiceFileName(invoice),
+       copies,
+     }, 120_000);
+@@ -65,7 +86,7 @@ function textValue(form: FormData, name: string): string {
+ 
+       ) : <EmptyState title="فاکتوری با این فیلتر پیدا نشد" description="فیلتر یا عبارت جست‌وجو را تغییر بده؛ اطلاعات این بخش مستقیماً از بک‌اند خوانده می‌شود." />}
+       <Modal open={Boolean(selected)} title={`فاکتور ${selected?.invoiceNumber || ""}`} description="پیش‌نمایش نسخه آمادهٔ PDF و چاپ" onClose={closePreview}>
+-        {selected && <InvoiceDetails invoice={selected} onEdit={() => { setFormState(initialFormState); setEditing(selected); setSelected(null); }} onDownload={() => void savePdf(selected)} onPrint={() => { setFormState(initialFormState); setPrintTarget(selected); setSelected(null); }} busy={busyAction === `save:${selected.id}`} canCorrect={canCorrect} canPrint={canPrint} />}
++        {selected && <InvoiceDetails invoice={invoiceWithCurrentStore(selected, data.storeProfile)} onEdit={() => { setFormState(initialFormState); setEditing(selected); setSelected(null); }} onDownload={() => void savePdf(selected)} onPrint={() => { setFormState(initialFormState); setPrintTarget(selected); setSelected(null); }} busy={busyAction === `save:${selected.id}`} canCorrect={canCorrect} canPrint={canPrint} />}
+       </Modal>
+       <Modal open={Boolean(editing)} title={`اصلاح فاکتور ${editing?.invoiceNumber || ""}`} description="مبالغ و اقلام قفل هستند؛ فقط اطلاعات چاپی با ثبت دلیل اصلاح می‌شوند." onClose={() => { setEditing(null); setFormState(initialFormState); }}>
+         {editing?.address && <form className="entity-form" onSubmit={submitCorrection}>
+diff --git a/GoldInvoice.Client/src/styles.css b/GoldInvoice.Client/src/styles.css
+index 66b2c8d..35678a9 100644
+--- a/GoldInvoice.Client/src/styles.css
++++ b/GoldInvoice.Client/src/styles.css
+@@ -44,3 +44,74 @@
+     left: 14px;
+   }
+ }
++
++
++/* Phase 9B hotfix: supplier wizard viewport safety and dark-mode contrast. */
++.modal-layer:has(.purchase-wizard) {
++  align-items: start;
++  overflow-y: auto;
++  overscroll-behavior: contain;
++}
++
++.modal-card:has(.purchase-wizard) {
++  display: flex;
++  max-height: calc(100dvh - 24px);
++  flex-direction: column;
++  margin-block: 12px;
++}
++
++.modal-card:has(.purchase-wizard) > header {
++  flex: 0 0 auto;
++}
++
++.modal-card:has(.purchase-wizard) .modal-body {
++  min-height: 0;
++  max-height: none;
++  flex: 1 1 auto;
++  overflow-x: hidden;
++  overflow-y: auto;
++  overscroll-behavior: contain;
++  scrollbar-gutter: stable;
++}
++
++.purchase-wizard {
++  min-width: 0;
++}
++
++.modal-card:has(.purchase-wizard) .wizard-panel {
++  min-height: 0;
++}
++
++:root[data-theme="dark"] .primary-button {
++  color: #fffdf8;
++  background: linear-gradient(135deg, #29496f, #203b5f);
++  border: 1px solid color-mix(in oklch, var(--gold) 22%, #29496f);
++  box-shadow: 0 8px 18px -12px rgb(0 0 0 / 0.8);
++}
++
++:root[data-theme="dark"] .primary-button:hover:not(:disabled) {
++  color: #ffffff;
++  background: linear-gradient(135deg, #355c86, #29496f);
++  border-color: color-mix(in oklch, var(--gold) 42%, #355c86);
++}
++
++:root[data-theme="dark"] .wizard-steps .is-current button > span {
++  color: #fffdf8;
++  background: var(--navy-soft);
++  border-color: color-mix(in oklch, var(--gold) 32%, var(--navy-soft));
++}
++
++@media (max-height: 760px) {
++  .modal-layer:has(.purchase-wizard) {
++    padding-block: 8px;
++  }
++
++  .modal-card:has(.purchase-wizard) {
++    max-height: calc(100dvh - 16px);
++    margin-block: 0;
++  }
++
++  .modal-card:has(.purchase-wizard) .wizard-panel {
++    min-height: 0;
++  }
++}

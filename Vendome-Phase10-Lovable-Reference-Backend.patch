@@ -1,0 +1,1634 @@
+diff --git a/GoldInvoice.Client/src/app/App.tsx b/GoldInvoice.Client/src/app/App.tsx
+index 289a604..8b1ffc9 100644
+--- a/GoldInvoice.Client/src/app/App.tsx
++++ b/GoldInvoice.Client/src/app/App.tsx
+@@ -160,11 +160,9 @@ function AuthenticatedApplication({ language }: { language: AppLanguage }) {
+         onNavigate={navigate}
+         onClose={() => setSidebarOpen(false)}
+       />
++      <MarketRail market={dashboard.market} />
+       {isDashboard ? (
+-        <>
+-          <MarketRail market={dashboard.market} />
+-          <DashboardPage snapshot={dashboard} onNavigate={navigate} />
+-        </>
++        <DashboardPage snapshot={dashboard} onNavigate={navigate} />
+       ) : (
+         <OperationsRouter
+           path={currentPath}
+diff --git a/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx b/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx
+index 0767e77..f43dfe0 100644
+--- a/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx
++++ b/GoldInvoice.Client/src/features/dashboard/DashboardPage.tsx
+@@ -99,7 +99,7 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
+         <article className="lux-card insight-card revenue-card">
+           <header className="card-header">
+             <div>
+-              <h2>فروش و سود</h2>
++              <h2>درآمد و سود</h2>
+               <p>فروش و سود واقعی پس از بهای خرید و تخفیف، به میلیون تومان</p>
+             </div>
+           </header>
+diff --git a/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts b/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts
+index 806dfc0..95f5795 100644
+--- a/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts
++++ b/GoldInvoice.Client/src/features/dashboard/buildDashboardSnapshot.ts
+@@ -77,9 +77,20 @@ export function buildDashboardSnapshot(
+   const pendingOrders = data.orders.filter((order) =>
+     !["Paid", "Completed", "Cancelled", "Refunded"].includes(order.status),
+   );
+-  const inventoryQuantity = data.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0);
+   const inventoryAvailable = data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0);
+   const receivables = pendingOrders.reduce((sum, order) => sum + order.grandTotalRials, 0);
++  const latestPurchaseFor = (variantId: string) => data.supplierPurchases
++    .filter((purchase) => purchase.productVariantId === variantId)
++    .sort((left, right) => new Date(right.purchasedAt).getTime() - new Date(left.purchasedAt).getTime())[0];
++  const inventoryValue = data.inventoryItems.reduce((sum, item) =>
++    sum + (latestPurchaseFor(item.productVariantId)?.sellingUnitPriceRials ?? item.averageUnitCostRials) * item.quantityAvailable,
++  0);
++  const customerDeposits = data.orders.reduce((sum, order) => {
++    const verified = data.payments
++      .filter((payment) => payment.orderId === order.id && payment.status === "Verified")
++      .reduce((paymentSum, payment) => paymentSum + payment.amountRials, 0);
++    return sum + Math.max(0, verified - order.grandTotalRials);
++  }, 0);
+ 
+   const metrics: PerformanceMetric[] = [
+     {
+@@ -91,14 +102,14 @@ export function buildDashboardSnapshot(
+     },
+     {
+       id: "today-profit",
+-      label: "سود ثبت‌شده امروز",
++      label: "سود امروز",
+       value: formatMoney(profitToday),
+       hint: "فروش منهای قیمت خرید و تخفیف",
+       ...trend(profitToday, profitYesterday),
+     },
+     {
+       id: "monthly-revenue",
+-      label: "درآمد ماه جاری",
++      label: "درآمد ماهانه",
+       value: formatMoney(monthlyRevenue),
+       hint: `${numberFormatter.format(issuedThisMonth.length)} فاکتور`,
+       ...trend(monthlyRevenue, previousRevenue),
+@@ -121,25 +132,25 @@ export function buildDashboardSnapshot(
+     },
+     {
+       id: "inventory-value",
+-      label: "موجودی انبار",
+-      value: `${numberFormatter.format(inventoryQuantity)} قطعه`,
+-      hint: `${numberFormatter.format(inventoryAvailable)} قابل فروش`,
++      label: "ارزش انبار",
++      value: formatMoney(inventoryValue),
++      hint: `${numberFormatter.format(inventoryAvailable)} قطعه قابل فروش`,
+       trend: "زنده",
+       direction: "neutral",
+     },
+     {
+       id: "receivables",
+-      label: "سفارش‌های تسویه‌نشده",
++      label: "مطالبات وصول‌نشده",
+       value: formatMoney(receivables),
+       hint: `${numberFormatter.format(pendingOrders.length)} سفارش`,
+       trend: "زنده",
+       direction: "neutral",
+     },
+     {
+-      id: "customers",
+-      label: "مشتریان ثبت‌شده",
+-      value: numberFormatter.format(data.customers.length),
+-      hint: "از دیتابیس کاربران",
++      id: "customer-deposits",
++      label: "سپرده مشتریان",
++      value: formatMoney(customerDeposits),
++      hint: "مازاد پرداخت تأییدشده",
+       trend: "واقعی",
+       direction: "neutral",
+     },
+@@ -208,12 +219,12 @@ export function buildDashboardSnapshot(
+   return {
+     profile,
+     quickOperations: [
+-      { id: "new-invoice", title: "فاکتور جدید", description: "ساخت سفارش، تسویه و صدور فاکتور رسمی.", meta: "شروع عملیات", path: "/orders/new" },
+-      { id: "new-customer", title: "مشتری جدید", description: "ثبت امن مشتری و اطلاعات تماس او.", meta: `${numberFormatter.format(data.customers.length)} مشتری`, path: "/customers?new=1" },
+-      { id: "new-product", title: "کالای جدید", description: "ثبت محصول، مدل طلا و مشخصات قیمت‌گذاری.", meta: `${numberFormatter.format(data.products.length)} محصول`, path: "/products?new=1" },
+-      { id: "inventory-receipt", title: "خرید از تأمین‌کننده", description: "ثبت تعداد، قیمت خرید و قیمت فروش دستی.", meta: `${numberFormatter.format(inventoryAvailable)} آماده فروش`, path: "/suppliers?purchase=1" },
+-      { id: "settlement", title: "تسویه سفارش", description: "ثبت پرداخت و صدور خودکار فاکتور.", meta: `${numberFormatter.format(pendingOrders.length)} در انتظار`, path: "/orders?settle=1" },
+-      { id: "daily-report", title: "گزارش روز", description: "مرور فروش، سود و وضعیت عملیات امروز.", meta: formatMoney(salesToday), path: "/reports" },
++      { id: "daily-operations", title: "عملیات روزانه", description: "باز کردن صندوق، مرور فعالیت روز و بستن دفاتر.", meta: `${numberFormatter.format(issuedToday.length)} فاکتور امروز`, path: "/reports/sales" },
++      { id: "trust-funds", title: "وجوه امانی", description: "سپرده‌های امانی مشتریان، تخصیص‌ها و آزادسازی‌ها.", meta: formatMoney(customerDeposits), path: "/customers" },
++      { id: "installments", title: "اقساط", description: "فروش اقساطی، جدول پرداخت و وضعیت وصول.", meta: `${numberFormatter.format(pendingOrders.length)} در انتظار`, path: "/orders" },
++      { id: "invoice-settlement", title: "تسویه فاکتور", description: "دریافت وجه، تسویه مانده‌ها و مرور تاریخچه پرداخت.", meta: formatMoney(receivables), path: "/orders?settle=1" },
++      { id: "bank-interest", title: "سود بانکی", description: "سود دریافتی سپرده‌ها و سود پرداختی تسهیلات.", meta: "اطلاعات مالی واقعی", path: "/accounting" },
++      { id: "bank-loans", title: "وام‌های بانکی", description: "تسهیلات، مانده بدهی، اقساط ماهانه و سود.", meta: "اطلاعات مالی واقعی", path: "/accounting" },
+     ],
+     metrics,
+     market: {
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index 1e67a6a..ce6b531 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -1,15 +1,11 @@
+ import {
+-  BarChart3,
+-  Boxes,
+   Calculator,
+   Check,
+   ChevronLeft,
+   Download,
+   Eye,
+-  FileText,
+   Gem,
+   HeartHandshake,
+-  IdCard,
+   ImagePlus,
+   KeyRound,
+   Mail,
+@@ -26,7 +22,6 @@ import {
+   Trash2,
+   Truck,
+   UserRound,
+-  Users,
+ } from "lucide-react";
+ import {
+   type FormEvent,
+@@ -38,12 +33,13 @@ import {
+ import { useAuthentication } from "../auth/AuthContext";
+ import { buildInvoiceDocumentHtml, invoiceFileName } from "../invoices/invoiceDocument";
+ import { DesktopBridgeError, isDesktopHost, sendDesktopCommand } from "../../platform/desktopBridge";
+-import { tomansToRials } from "../../lib/money";
++import { activeNumberLocale, rialsToTomans, tomansToRials } from "../../lib/money";
+ import { createIdempotencyKey, OperationalApiError } from "./operationsApi";
+ import { useOperations } from "./OperationsContext";
+ import { SupplierPurchasesPage } from "./SupplierPurchasesPage";
+ import {
+   EmptyState,
++  FeatureNavigationCard,
+   FormActions,
+   FormField,
+   formatDate,
+@@ -53,6 +49,7 @@ import {
+   MetricTile,
+   Modal,
+   PageHeader,
++  ReferencePageHeader,
+   RefreshButton,
+   StatusBadge,
+   TableCard,
+@@ -67,6 +64,7 @@ import type {
+   Payment,
+   Person,
+   Product,
++  ProductPricingRule,
+   ProductVariant,
+   StoreProfile,
+   Supplier,
+@@ -123,6 +121,40 @@ function queryValue(path: string, name: string): string {
+   return new URLSearchParams(query).get(name) || "";
+ }
+ 
++function routeBase(path: string): string {
++  return path.split("?")[0];
++}
++
++function formatDateOnly(value?: string | null): string {
++  if (!value) return "—";
++  const locale = activeNumberLocale() === "fa-IR" ? "fa-IR-u-ca-persian" : "en-US";
++  return new Intl.DateTimeFormat(locale, {
++    year: "numeric",
++    month: "short",
++    day: "numeric",
++  }).format(new Date(value));
++}
++
++function formatYear(value?: string | null): string {
++  if (!value) return "—";
++  const locale = activeNumberLocale() === "fa-IR" ? "fa-IR-u-ca-persian" : "en-US";
++  return new Intl.DateTimeFormat(locale, { year: "numeric" }).format(new Date(value));
++}
++
++function formatCompactMoney(valueInRials: number): string {
++  const locale = activeNumberLocale();
++  const amount = new Intl.NumberFormat(locale, {
++    notation: "compact",
++    maximumFractionDigits: 1,
++  }).format(rialsToTomans(valueInRials));
++  return `${amount} ${locale === "fa-IR" ? "تومان" : "toman"}`;
++}
++
++function initialsOf(name: string): string {
++  const parts = name.trim().split(/\s+/).filter(Boolean);
++  return `${parts[0]?.[0] || "و"}${parts.length > 1 ? parts.at(-1)?.[0] || "" : ""}`;
++}
++
+ function ModuleBody({ children }: { children: ReactNode }) {
+   const { loading } = useOperations();
+   if (loading) return <main className="module-main" dir="rtl"><LoadingState /></main>;
+@@ -155,10 +187,35 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+   const [printTarget, setPrintTarget] = useState<Invoice | null>(null);
+   const [busyAction, setBusyAction] = useState<string | null>(null);
+   const [formState, setFormState] = useState<FormState>(initialFormState);
+-  const total = data.invoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0);
+-  const active = data.invoices.filter((invoice) => invoice.status !== "Voided");
++  const [searchTerm, setSearchTerm] = useState("");
++  const [statusFilter, setStatusFilter] = useState("all");
+   const canCorrect = user?.permissions.includes("Orders.Manage") === true;
+   const canPrint = user?.permissions.includes("Invoices.Print") === true;
++  const requestedCustomerId = queryValue(path, "customerId");
++  const paymentFor = (invoice: Invoice) => data.payments.find((payment) =>
++    payment.id === invoice.paymentId || payment.invoiceId === invoice.id,
++  );
++  const displayStatus = (invoice: Invoice) => {
++    if (["Voided", "Draft", "Overdue"].includes(invoice.status)) return invoice.status;
++    const payment = paymentFor(invoice);
++    return payment?.status === "Verified" ? "Paid" : "Pending";
++  };
++  const filteredInvoices = data.invoices.filter((invoice) => {
++    if (requestedCustomerId && invoice.customerId !== requestedCustomerId) return false;
++    const normalizedSearch = searchTerm.trim().toLocaleLowerCase("fa");
++    if (normalizedSearch && ![
++      invoice.invoiceNumber,
++      invoice.customerNameSnapshot || "",
++    ].some((value) => value.toLocaleLowerCase("fa").includes(normalizedSearch))) return false;
++    return statusFilter === "all" || displayStatus(invoice).toLocaleLowerCase() === statusFilter;
++  });
++  const invoiceTabs = [
++    { id: "all", label: "همه" },
++    { id: "paid", label: "پرداخت‌شده" },
++    { id: "pending", label: "در انتظار" },
++    { id: "overdue", label: "معوق" },
++    { id: "draft", label: "پیش‌نویس" },
++  ];
+ 
+   useEffect(() => {
+     const requestedInvoiceId = queryValue(path, "open");
+@@ -307,44 +364,77 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+ 
+   return (
+     <ModuleBody>
+-      <PageHeader
+-        icon={FileText}
++      <ReferencePageHeader
++        eyebrow="صدور صورتحساب"
+         title="فاکتورها"
+-        description="فاکتورهای صادرشده مستقیماً از سرویس صدور فاکتور خوانده می‌شوند."
+-        actionLabel="فاکتور جدید"
++        description="همه فروش‌های مِزون، از سفارش‌های اختصاصی تا خریدهای بوتیک."
++        actionLabel="ایجاد فاکتور"
+         onAction={() => onNavigate("/orders/new")}
+-        secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />}
+       />
+       <DataNotice />
+-      <div className="module-metrics-grid">
+-        <MetricTile label="کل فاکتورها" value={String(data.invoices.length)} hint="رکورد دیتابیس" />
+-        <MetricTile label="فاکتور معتبر" value={String(active.length)} hint="غیرباطل" />
+-        <MetricTile label="مبلغ کل" value={formatMoney(total)} hint="همه دوره‌ها" />
+-      </div>
+-      {data.invoices.length ? (
++      <section className="reference-filter-bar fade-up" aria-label="فیلتر فاکتورها">
++        <label className="reference-search">
++          <Search size={16} />
++          <input
++            type="search"
++            value={searchTerm}
++            onChange={(event) => setSearchTerm(event.target.value)}
++            placeholder="جست‌وجو بر اساس مشتری یا شماره"
++          />
++        </label>
++        <div className="reference-tabs" role="tablist" aria-label="وضعیت فاکتور">
++          {invoiceTabs.map((tab) => (
++            <button
++              className={statusFilter === tab.id ? "is-active" : ""}
++              type="button"
++              role="tab"
++              aria-selected={statusFilter === tab.id}
++              onClick={() => setStatusFilter(tab.id)}
++              key={tab.id}
++            >
++              {tab.label}
++            </button>
++          ))}
++        </div>
++        <button className="reference-refresh" type="button" onClick={() => void refresh()} disabled={refreshing}>
++          {refreshing ? "در حال دریافت…" : "به‌روزرسانی"}
++        </button>
++      </section>
++      {requestedCustomerId && (
++        <div className="reference-active-filter">
++          فاکتورهای {data.customers.find((customer) => customer.id === requestedCustomerId)?.displayName || "مشتری"}
++          <button type="button" onClick={() => onNavigate("/invoices")}>نمایش همه</button>
++        </div>
++      )}
++      {filteredInvoices.length ? (
+         <TableCard>
+           <div className="table-scroll">
+-            <table className="data-table">
+-              <thead><tr><th>شماره</th><th>مشتری</th><th>تاریخ صدور</th><th>مبلغ</th><th>وضعیت</th><th /></tr></thead>
+-              <tbody>{data.invoices.map((invoice) => (
+-                <tr key={invoice.id}>
+-                  <td className="numeric-cell">{invoice.invoiceNumber}</td>
+-                  <td>{invoice.customerNameSnapshot || "مشتری ثبت‌شده"}</td>
+-                  <td>{formatDate(invoice.issuedAt)}</td>
+-                  <td>{formatMoney(invoice.grandTotalRials)}</td>
+-                  <td><StatusBadge status={invoice.status} /></td>
+-                  <td><div className="icon-action-group">
+-                    <button className="icon-action icon-action--gold" type="button" title="مشاهده فاکتور" aria-label={`مشاهده فاکتور ${invoice.invoiceNumber}`} onClick={() => setSelected(invoice)}><Eye size={16} /></button>
+-                    <button className="icon-action" type="button" title="ویرایش اطلاعات چاپی" aria-label={`ویرایش فاکتور ${invoice.invoiceNumber}`} disabled={invoice.status !== "Issued" || !canCorrect} onClick={() => { setFormState(initialFormState); setEditing(invoice); }}><Pencil size={15} /></button>
+-                    <button className="icon-action" type="button" title="دانلود PDF" aria-label={`دانلود فاکتور ${invoice.invoiceNumber}`} disabled={busyAction === `save:${invoice.id}`} onClick={() => void savePdf(invoice)}><Download size={15} /></button>
+-                    <button className="icon-action" type="button" title="چاپ فاکتور" aria-label={`چاپ فاکتور ${invoice.invoiceNumber}`} disabled={invoice.status !== "Issued" || !canPrint} onClick={() => { setFormState(initialFormState); setPrintTarget(invoice); }}><Printer size={15} /></button>
+-                  </div></td>
+-                </tr>
+-              ))}</tbody>
++            <table className="data-table reference-invoices-table">
++              <thead><tr><th>فاکتور</th><th>مشتری</th><th>تاریخ</th><th>تعداد اقلام</th><th>روش پرداخت</th><th>مبلغ کل</th><th>وضعیت</th><th>عملیات</th></tr></thead>
++              <tbody>{filteredInvoices.map((invoice) => {
++                const payment = paymentFor(invoice);
++                return (
++                  <tr key={invoice.id}>
++                    <td className="numeric-cell"><strong>{invoice.invoiceNumber}</strong></td>
++                    <td>{invoice.customerNameSnapshot || "مشتری ثبت‌شده"}</td>
++                    <td>{formatDateOnly(invoice.issuedAt)}</td>
++                    <td>{invoice.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
++                    <td>{payment ? translateStatus(payment.method) : "—"}</td>
++                    <td><strong>{formatMoney(invoice.grandTotalRials)}</strong></td>
++                    <td><StatusBadge status={displayStatus(invoice)} /></td>
++                    <td><div className="icon-action-group">
++                      <button className="icon-action icon-action--gold" type="button" title="مشاهده فاکتور" aria-label={`مشاهده فاکتور ${invoice.invoiceNumber}`} onClick={() => setSelected(invoice)}><Eye size={16} /></button>
++                      <button className="icon-action" type="button" title="ویرایش اطلاعات چاپی" aria-label={`ویرایش فاکتور ${invoice.invoiceNumber}`} disabled={invoice.status !== "Issued" || !canCorrect} onClick={() => { setFormState(initialFormState); setEditing(invoice); }}><Pencil size={15} /></button>
++                      <button className="icon-action" type="button" title="دانلود PDF" aria-label={`دانلود فاکتور ${invoice.invoiceNumber}`} disabled={busyAction === `save:${invoice.id}`} onClick={() => void savePdf(invoice)}><Download size={15} /></button>
++                      <button className="icon-action" type="button" title="چاپ فاکتور" aria-label={`چاپ فاکتور ${invoice.invoiceNumber}`} disabled={invoice.status !== "Issued" || !canPrint} onClick={() => { setFormState(initialFormState); setPrintTarget(invoice); }}><Printer size={15} /></button>
++                    </div></td>
++                  </tr>
++                );
++              })}</tbody>
+             </table>
+           </div>
+         </TableCard>
+-      ) : <EmptyState title="هنوز فاکتوری صادر نشده" description="از «فاکتور جدید» سفارش را بساز و پس از ثبت پرداخت، فاکتور خودکار صادر می‌شود." />}
++      ) : <EmptyState title="فاکتوری با این فیلتر پیدا نشد" description="فیلتر یا عبارت جست‌وجو را تغییر بده؛ اطلاعات این بخش مستقیماً از بک‌اند خوانده می‌شود." />}
+       <Modal open={Boolean(selected)} title={`فاکتور ${selected?.invoiceNumber || ""}`} description="پیش‌نمایش نسخه آمادهٔ PDF و چاپ" onClose={closePreview}>
+         {selected && <InvoiceDetails invoice={selected} onEdit={() => { setFormState(initialFormState); setEditing(selected); setSelected(null); }} onDownload={() => void savePdf(selected)} onPrint={() => { setFormState(initialFormState); setPrintTarget(selected); setSelected(null); }} busy={busyAction === `save:${selected.id}`} canCorrect={canCorrect} canPrint={canPrint} />}
+       </Modal>
+@@ -407,7 +497,7 @@ function InvoiceDetails({
+ type AddressMode = "create" | "view" | "edit" | "delete" | null;
+ 
+ function CustomersPage({ path, onNavigate, onNotice }: RouteProps) {
+-  const { data, request, refresh, refreshing } = useOperations();
++  const { data, request, refresh } = useOperations();
+   const [createOpen, setCreateOpen] = useState(queryFlag(path, "new"));
+   const [addressCustomer, setAddressCustomer] = useState<Person | null>(null);
+   const [addressMode, setAddressMode] = useState<AddressMode>(null);
+@@ -558,38 +648,77 @@ function CustomersPage({ path, onNavigate, onNotice }: RouteProps) {
+       : addressMode === "delete"
+         ? "حذف نشانی"
+         : `ثبت نشانی ${addressCustomer?.displayName || "مشتری"}`;
++  const customerSummaries = useMemo(() => data.customers.map((customer) => {
++    const invoices = data.invoices.filter((invoice) =>
++      invoice.customerId === customer.id && invoice.status !== "Voided",
++    );
++    const orders = data.orders.filter((order) => order.customerId === customer.id);
++    const totalPurchases = invoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0);
++    const outstanding = orders
++      .filter((order) => !["Paid", "Completed", "Cancelled", "Refunded"].includes(order.status))
++      .reduce((sum, order) => sum + order.grandTotalRials, 0);
++    const deposits = orders.reduce((sum, order) => {
++      const paid = data.payments
++        .filter((payment) => payment.orderId === order.id && payment.status === "Verified")
++        .reduce((paymentSum, payment) => paymentSum + payment.amountRials, 0);
++      return sum + Math.max(0, paid - order.grandTotalRials);
++    }, 0);
++    const latestInvoiceWithAddress = invoices
++      .filter((invoice) => invoice.address?.city)
++      .sort((left, right) => new Date(right.issuedAt).getTime() - new Date(left.issuedAt).getTime())[0];
++    const city = latestInvoiceWithAddress?.address?.city || orders.find((order) => order.address?.city)?.address?.city || "شهر ثبت نشده";
++    const tier = totalPurchases >= 5_000_000_000
++      ? "پلاتینی"
++      : totalPurchases >= 1_000_000_000
++        ? "طلایی"
++        : "نقره‌ای";
++    return { customer, totalPurchases, outstanding, deposits, city, tier };
++  }), [data.customers, data.invoices, data.orders, data.payments]);
+ 
+   return (
+     <ModuleBody>
+-      <PageHeader icon={Users} title="مشتریان" description="اطلاعات تماس، نشانی و سابقه سفارش مشتریان در یک نمای واحد."
+-        actionLabel="مشتری جدید" onAction={() => { setFormState(initialFormState); setCreateOpen(true); }} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} />
++      <ReferencePageHeader
++        eyebrow="مشتریان"
++        title="مشتریان"
++        description="افرادی که پشت هر قطعه‌اند — سابقه، جایگاه و مانده حساب‌ها."
++        actionLabel="مشتری جدید"
++        onAction={() => { setFormState(initialFormState); setCreateOpen(true); }}
++      />
+       <DataNotice />
+-      <div className="module-metrics-grid">
+-        <MetricTile label="مشتریان فعال" value={String(data.customers.filter((item) => item.isActive).length)} hint="حساب قابل استفاده" />
+-        <MetricTile label="دارای سفارش" value={String(data.customers.filter((item) => item.orderCount > 0).length)} hint="سابقه خرید" />
+-        <MetricTile label="کل فاکتورها" value={String(data.customers.reduce((sum, item) => sum + item.invoiceCount, 0))} hint="متصل به مشتری" />
+-      </div>
+       {data.customers.length ? (
+-        <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>نام</th><th>شماره تلفن</th><th>سفارش</th><th>فاکتور</th><th>آخرین فعالیت</th><th>نشانی</th><th>سفارش جدید</th></tr></thead><tbody>
+-          {data.customers.map((customer) => {
++        <div className="reference-customer-grid">
++          {customerSummaries.map(({ customer, totalPurchases, outstanding, deposits, city, tier }, index) => {
+             const addressCount = addressCounts[customer.id] ?? customer.addressCount;
+-            return <tr key={customer.id}>
+-              <td><strong>{customer.displayName}</strong></td>
+-              <td className="numeric-cell">{customer.phoneNumber || "—"}</td>
+-              <td>{customer.orderCount}</td>
+-              <td>{customer.invoiceCount}</td>
+-              <td>{formatDate(customer.lastActivityAt)}</td>
+-              <td>{addressCount > 0 ? (
+-                <div className="icon-action-group">
+-                  <button className="icon-action" type="button" title="مشاهده نشانی" aria-label={`مشاهده نشانی ${customer.displayName}`} onClick={() => void loadAddresses(customer, "view")}><Eye size={16} /></button>
+-                  <button className="icon-action" type="button" title="ویرایش نشانی" aria-label={`ویرایش نشانی ${customer.displayName}`} onClick={() => void loadAddresses(customer, "edit")}><Pencil size={15} /></button>
+-                  <button className="icon-action icon-action--danger" type="button" title="حذف نشانی" aria-label={`حذف نشانی ${customer.displayName}`} onClick={() => void loadAddresses(customer, "delete")}><Trash2 size={15} /></button>
+-                </div>
+-              ) : <button className="row-action" type="button" onClick={() => openNewAddress(customer)}><MapPin size={15} /> ثبت نشانی</button>}</td>
+-              <td><button className="icon-action icon-action--gold" type="button" title="ثبت سفارش" aria-label={`ثبت سفارش برای ${customer.displayName}`} onClick={() => onNavigate(`/orders/new?customerId=${customer.id}`)}><ShoppingBag size={16} /></button></td>
+-            </tr>;
++            return (
++              <article className="lux-card reference-customer-card fade-up" style={{ animationDelay: `${index * 35}ms` }} key={customer.id}>
++                <header>
++                  <span className="reference-customer-avatar" aria-hidden="true">{initialsOf(customer.displayName)}</span>
++                  <div className="reference-customer-identity">
++                    <h2>{customer.displayName}</h2>
++                    <p>{city} · مشتری از {formatYear(customer.createdAt)}</p>
++                    <span className="reference-customer-phone">موبایل: <b dir="ltr">{customer.phoneNumber || "—"}</b></span>
++                  </div>
++                  <span className={`loyalty-badge loyalty-badge--${tier === "پلاتینی" ? "platinum" : tier === "طلایی" ? "gold" : "silver"}`}>{tier}</span>
++                </header>
++                <dl className="reference-customer-stats">
++                  <button className="customer-stat" type="button" onClick={() => onNavigate(`/orders/new?customerId=${customer.id}`)} title="ثبت خرید جدید">
++                    <dt>خریدها</dt><dd>{customer.orderCount}</dd>
++                  </button>
++                  <div><dt>مجموع خرید</dt><dd title={formatMoney(totalPurchases)}>{formatCompactMoney(totalPurchases)}</dd></div>
++                  <div><dt>مانده بدهی</dt><dd className={outstanding > 0 ? "negative-text" : ""} title={formatMoney(outstanding)}>{formatCompactMoney(outstanding)}</dd></div>
++                  <div><dt>سپرده‌ها</dt><dd title={formatMoney(deposits)}>{formatCompactMoney(deposits)}</dd></div>
++                </dl>
++                <footer className="reference-customer-links">
++                  <button type="button" onClick={() => onNavigate(`/invoices?customerId=${customer.id}`)}>فاکتورها</button>
++                  <button type="button" onClick={() => onNavigate(`/orders?customerId=${customer.id}`)}>اقساط</button>
++                  <button type="button" onClick={() => addressCount > 0 ? void loadAddresses(customer, "view") : openNewAddress(customer)}>مدارک</button>
++                  <button type="button" onClick={() => onNavigate(`/crm?customerId=${customer.id}`)}>یادداشت‌ها</button>
++                  <button type="button" onClick={() => onNavigate(`/crm?customerId=${customer.id}`)}>ارتباطات</button>
++                </footer>
++              </article>
++            );
+           })}
+-        </tbody></table></div></TableCard>
++        </div>
+       ) : <EmptyState title="مشتری ثبت نشده" description="اولین مشتری را با دکمه بالا ثبت کن؛ دادهٔ نمونه نمایش داده نمی‌شود." />}
+       <Modal open={createOpen} title="ثبت مشتری جدید" description="مشتری با شماره تلفن یکتا ثبت می‌شود و ایمیل لازم نیست." onClose={closeCreate}>
+         <form className="entity-form" onSubmit={submitCustomer}>
+@@ -676,15 +805,35 @@ function ProductPhoto({ product }: { product: Product }) {
+ 
+ function ProductsPage({ path, onNavigate, onNotice }: RouteProps) {
+   const { data, request, refresh, refreshing } = useOperations();
++  const productRoute = routeBase(path);
+   const [createOpen, setCreateOpen] = useState(queryFlag(path, "new"));
+   const [variantProduct, setVariantProduct] = useState<Product | null>(null);
+   const [imageProduct, setImageProduct] = useState<Product | null>(null);
++  const [pricingRules, setPricingRules] = useState<ProductPricingRule[]>([]);
++  const [pricingLoading, setPricingLoading] = useState(false);
++  const [pricingError, setPricingError] = useState<string | null>(null);
+   const [formState, setFormState] = useState<FormState>(initialFormState);
+   const categoryFilter = queryValue(path, "categoryId");
+   const filteredProducts = categoryFilter
+     ? data.products.filter((product) => product.productCategoryId === categoryFilter)
+     : data.products;
+-  const closeCreate = () => { setFormState(initialFormState); setCreateOpen(false); if (queryFlag(path, "new")) onNavigate("/products"); };
++  useEffect(() => {
++    let active = true;
++    if (productRoute !== "/products/pricing") return () => { active = false; };
++    const variantIds = data.products.flatMap((product) => product.variants.map((variant) => variant.id));
++    setPricingLoading(true);
++    setPricingError(null);
++    void Promise.allSettled(variantIds.map((variantId) =>
++      request<ProductPricingRule[]>(`/api/v1/pricing/rules/variant/${variantId}`),
++    )).then((results) => {
++      if (!active) return;
++      setPricingRules(results.flatMap((result) => result.status === "fulfilled" ? result.value : []));
++      const failed = results.find((result) => result.status === "rejected");
++      setPricingError(failed?.status === "rejected" ? messageOf(failed.reason) : null);
++    }).finally(() => { if (active) setPricingLoading(false); });
++    return () => { active = false; };
++  }, [data.products, productRoute, request]);
++  const closeCreate = () => { setFormState(initialFormState); setCreateOpen(false); if (queryFlag(path, "new")) onNavigate("/products/collections"); };
+   const submitProduct = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null });
+     const file = form.get("image");
+@@ -710,9 +859,46 @@ function ProductsPage({ path, onNavigate, onNotice }: RouteProps) {
+     event.preventDefault(); if (!variantProduct) return; const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null });
+     try { const variant = await request<ProductVariant>(`/api/v1/catalog/products/${variantProduct.id}/variants`, { method: "POST", body: JSON.stringify({ sku: textValue(form, "sku"), name: textValue(form, "name"), goldDetail: { karat: numberValue(form, "karat"), grossWeight: numberValue(form, "grossWeight"), netGoldWeight: numberValue(form, "netGoldWeight"), stoneWeight: numberValue(form, "stoneWeight"), otherMaterialWeight: numberValue(form, "otherMaterialWeight"), manufacturingWageType: "FixedRials", manufacturingWageValue: 0, profitPercentage: 0, taxPercentage: 0, hasStone: form.get("hasStone") === "on", isWeightVariable: form.get("isWeightVariable") === "on" } }) }); await request("/api/v1/pricing/rules", { method: "POST", body: JSON.stringify({ productVariantId: variant.id, pricingMethod: "FixedPrice", goldMarketPriceType: null, fixedPriceRials: tomansToRials(numberValue(form, "fixedPriceTomans")), fixedGoldPricePerGramRials: null, wageType: "FixedRials", wageValue: 0, profitPercentage: 0, taxPercentage: 0, effectiveFrom: new Date().toISOString(), effectiveTo: null }) }); onNotice("مدل محصول و قیمت فروش آن ثبت شد."); setFormState(initialFormState); setVariantProduct(null); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); }
+   };
+-  return <ModuleBody><PageHeader icon={Gem} title="محصولات" description="کاتالوگ، مدل‌ها، کد کالا و مشخصات تخصصی طلا." actionLabel="محصول جدید" onAction={() => { setFormState(initialFormState); setCreateOpen(true); }} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice />
++  if (productRoute === "/products" && !queryFlag(path, "new")) {
++    return <ModuleBody>
++      <ReferencePageHeader eyebrow="کاتالوگ" title="محصولات" description="کاتالوگ وندوم — کلکسیون‌ها، کدهای محصول و قواعد قیمت‌گذاری." />
++      <DataNotice />
++      <div className="reference-feature-grid reference-feature-grid--three">
++        <FeatureNavigationCard title="کلکسیون‌ها" description="اِکلا، لومیر، سِرَن و ریو — هرکدام با جدول قیمت و بسته تبلیغاتی اختصاصی." meta={`${data.products.length} محصول ثبت‌شده`} onClick={() => onNavigate("/products/collections")} />
++        <FeatureNavigationCard title="قواعد قیمت‌گذاری" description="قیمت بر پایه وزن طلا با نرخ لحظه‌ای ۱۸ و ۲۴ عیار، اجرت و حاشیه تولید." meta={`${data.marketPrices.length} نرخ زنده`} onClick={() => onNavigate("/products/pricing")} />
++        <FeatureNavigationCard title="سفارش‌های اختصاصی" description="محصولات سفارشی با طرح مشتری، تأمین نگین و زمان‌بندی آتلیه." meta={`${data.orders.length} سفارش واقعی`} onClick={() => onNavigate("/products/custom")} />
++      </div>
++    </ModuleBody>;
++  }
++  if (productRoute === "/products/pricing") {
++    const variants = data.products.flatMap((product) => product.variants.map((variant) => ({ product, variant })));
++    const latestPurchase = (variantId: string) => data.supplierPurchases
++      .filter((purchase) => purchase.productVariantId === variantId)
++      .sort((left, right) => new Date(right.purchasedAt).getTime() - new Date(left.purchasedAt).getTime())[0];
++    const latestRule = (variantId: string) => pricingRules
++      .filter((rule) => rule.productVariantId === variantId && rule.isActive)
++      .sort((left, right) => new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime())[0];
++    return <ModuleBody>
++      <ReferencePageHeader eyebrow="کاتالوگ" title="قواعد قیمت‌گذاری" description="قیمت خرید و فروش هر مدل در کنار نرخ‌های واقعی بازار و حاشیه مورد انتظار." secondary={<button className="secondary-button" type="button" onClick={() => onNavigate("/products")}>بازگشت</button>} />
++      <DataNotice />
++      <div className="module-metrics-grid">
++        {data.marketPrices.filter((price) => ["Gold18K", "Gold24K"].includes(price.priceType)).map((price) => <MetricTile key={price.id} label={price.priceType === "Gold18K" ? "طلای ۱۸ عیار" : "طلای ۲۴ عیار"} value={formatMoney(price.sellPriceRials)} hint={`ثبت‌شده در ${formatDate(price.capturedAt)}`} />)}
++        <MetricTile label="مدل‌های قیمت‌گذاری‌شده" value={String(variants.filter(({ variant }) => Boolean(latestRule(variant.id))).length)} hint={`از ${variants.length} مدل`} />
++      </div>
++      {pricingLoading ? <LoadingState /> : <>{pricingError && <div className="data-warning">بخشی از قواعد قیمت‌گذاری دریافت نشد: {pricingError}</div>}{variants.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>محصول</th><th>کد کالا</th><th>عیار</th><th>وزن خالص</th><th>روش قیمت‌گذاری</th><th>قیمت خرید</th><th>قیمت فروش</th><th>حاشیه مورد انتظار</th><th>منبع قیمت</th></tr></thead><tbody>{variants.map(({ product, variant }) => { const purchase = latestPurchase(variant.id); const rule = latestRule(variant.id); const sellingPrice = rule?.fixedPriceRials ?? purchase?.sellingUnitPriceRials; return <tr key={variant.id}><td><strong>{product.name}</strong><small>{variant.name}</small></td><td className="numeric-cell">{variant.sku}</td><td>{variant.goldDetail?.karat || "—"}</td><td>{variant.goldDetail ? `${variant.goldDetail.netGoldWeight} گرم` : "—"}</td><td>{rule ? translateStatus(rule.pricingMethod) : "ثبت نشده"}</td><td>{purchase ? formatMoney(purchase.unitCostRials) : "ثبت نشده"}</td><td>{sellingPrice ? formatMoney(sellingPrice) : rule?.goldMarketPriceType ? translateStatus(rule.goldMarketPriceType) : "ثبت نشده"}</td><td className={purchase && purchase.expectedUnitProfitRials < 0 ? "negative-text" : "positive-text"}>{purchase ? formatMoney(purchase.expectedUnitProfitRials) : rule ? `${rule.profitPercentage}٪` : "—"}</td><td>{purchase?.supplierName || rule?.goldMarketPriceType || "—"}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="مدل محصولی ثبت نشده" description="از کلکسیون‌ها یک محصول و مدل واقعی ثبت کن تا قواعد قیمت‌گذاری نمایش داده شوند." />}</>}
++    </ModuleBody>;
++  }
++  if (productRoute === "/products/custom") {
++    return <ModuleBody>
++      <ReferencePageHeader eyebrow="کاتالوگ" title="سفارش‌های اختصاصی" description="سفارش‌های مشتریان و اقلام آن‌ها؛ همه رکوردها مستقیماً از بک‌اند خوانده می‌شوند." secondary={<button className="secondary-button" type="button" onClick={() => onNavigate("/products")}>بازگشت</button>} />
++      <DataNotice />
++      <div className="inline-help">در نسخه فعلی بک‌اند، نوع «اختصاصی» جداگانه روی سفارش ذخیره نمی‌شود؛ این نما همه سفارش‌های واقعی را نمایش می‌دهد.</div>
++      {data.orders.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>سفارش</th><th>مشتری</th><th>محصولات</th><th>تعداد اقلام</th><th>مبلغ</th><th>وضعیت</th></tr></thead><tbody>{data.orders.map((order) => <tr key={order.id}><td className="numeric-cell">{order.orderNumber}</td><td>{order.customerNameSnapshot || "مشتری"}</td><td>{order.items.map((item) => item.productName).join("، ") || "—"}</td><td>{order.items.reduce((sum, item) => sum + item.quantity, 0)}</td><td>{formatMoney(order.grandTotalRials)}</td><td><StatusBadge status={order.status} /></td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="سفارش اختصاصی ثبت نشده" description="پس از ثبت سفارش مشتری، اقلام واقعی آن در این صفحه نمایش داده می‌شوند." />}
++    </ModuleBody>;
++  }
++  return <ModuleBody><ReferencePageHeader eyebrow="کاتالوگ" title="کلکسیون‌ها" description="مدیریت کلکسیون‌ها، تصاویر، کدهای محصول و مشخصات تخصصی هر قطعه." actionLabel="محصول جدید" onAction={() => { setFormState(initialFormState); setCreateOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/products")}>بازگشت</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />
+     <div className="module-metrics-grid"><MetricTile label="محصول" value={String(data.products.length)} hint="کالای اصلی" /><MetricTile label="مدل کالا" value={String(data.products.reduce((sum, item) => sum + item.variants.length, 0))} hint="SKU ثبت‌شده" /><MetricTile label="دسته‌بندی" value={String(data.categories.length)} hint="ساختار کاتالوگ" /></div>
+-    {categoryFilter && <div className="inline-help">فیلتر دسته‌بندی فعال است. <button className="text-button" type="button" onClick={() => onNavigate("/products")}>نمایش همه محصولات</button></div>}
++    {categoryFilter && <div className="inline-help">فیلتر دسته‌بندی فعال است. <button className="text-button" type="button" onClick={() => onNavigate("/products/collections")}>نمایش همه محصولات</button></div>}
+     {filteredProducts.length ? <div className="card-grid">{filteredProducts.map((product) => <article className="lux-card entity-card product-card" key={product.id}><ProductPhoto product={product} /><header><div><small>{data.categories.find((item) => item.id === product.productCategoryId)?.name || "بدون دسته"}</small><h3>{product.name}</h3></div><StatusBadge status={product.isActive ? "Active" : "Inactive"} /></header><p>{product.description || "توضیحی ثبت نشده است."}</p><div className="chip-list">{product.variants.map((variant) => <span key={variant.id}>{variant.sku} · {variant.name}</span>)}{!product.variants.length && <span>هنوز مدلی ندارد</span>}</div><div className="entity-card-actions"><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setVariantProduct(product); }}><PackagePlus size={15} /> افزودن مدل</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setImageProduct(product); }}><ImagePlus size={15} /> {product.images.length ? "تغییر تصویر" : "افزودن تصویر"}</button></div></article>)}</div> : <EmptyState title="محصولی یافت نشد" description="محصول و تصویر آن را ثبت کن تا در انبار و سفارش قابل استفاده باشد." />}
+     <Modal open={createOpen} title="ثبت محصول" description="تصویر JPG، PNG یا WebP تا ۵ مگابایت الزامی است." onClose={closeCreate}><form className="entity-form" onSubmit={submitProduct}><FormField label="نام محصول"><input name="name" required /></FormField><FormField label="شناسه لاتین" hint="مثلاً gold-ring-001"><input name="slug" dir="ltr" required /></FormField><FormField label="دسته‌بندی"><select name="categoryId"><option value="">بدون دسته</option>{data.categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField><FormField label="تصویر محصول" wide><input name="image" type="file" accept="image/jpeg,image/png,image/webp" required /></FormField><FormField label="توضیحات" wide><textarea name="description" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت محصول و تصویر" onCancel={closeCreate} /></form></Modal>
+     <Modal open={Boolean(imageProduct)} title={`تصویر ${imageProduct?.name || "محصول"}`} onClose={() => { setImageProduct(null); setFormState(initialFormState); }}><form className="entity-form" onSubmit={submitImage}><FormField label="فایل تصویر" wide><input name="image" type="file" accept="image/jpeg,image/png,image/webp" required /></FormField><FormField label="متن جایگزین" wide><input name="altText" defaultValue={imageProduct?.name || ""} /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ذخیره تصویر" onCancel={() => { setImageProduct(null); setFormState(initialFormState); }} /></form></Modal>
+@@ -724,14 +910,36 @@ function InventoryPage({ path, onNavigate, onNotice }: RouteProps) {
+   const { data, request, refresh, refreshing } = useOperations();
+   const [warehouseOpen, setWarehouseOpen] = useState(false);
+   const [receiptOpen, setReceiptOpen] = useState(queryFlag(path, "receipt"));
++  const [searchTerm, setSearchTerm] = useState("");
+   const [formState, setFormState] = useState<FormState>(initialFormState);
+   const variants = useMemo(() => data.products.flatMap((product) => product.variants.map((variant) => ({ ...variant, productName: product.name }))), [data.products]);
++  const latestPurchases = useMemo(() => {
++    const byVariant = new Map<string, SupplierPurchase>();
++    [...data.supplierPurchases]
++      .sort((left, right) => new Date(right.purchasedAt).getTime() - new Date(left.purchasedAt).getTime())
++      .forEach((purchase) => { if (!byVariant.has(purchase.productVariantId)) byVariant.set(purchase.productVariantId, purchase); });
++    return byVariant;
++  }, [data.supplierPurchases]);
++  const filteredInventory = data.inventoryItems.filter((item) => {
++    const variant = variants.find((value) => value.id === item.productVariantId);
++    const normalized = searchTerm.trim().toLocaleLowerCase("fa");
++    return !normalized || [variant?.sku || "", variant?.name || "", variant?.productName || ""]
++      .some((value) => value.toLocaleLowerCase("fa").includes(normalized));
++  });
++  const vaultValue = data.inventoryItems.reduce((sum, item) => {
++    const sellingPrice = latestPurchases.get(item.productVariantId)?.sellingUnitPriceRials;
++    return sum + (sellingPrice ?? item.averageUnitCostRials) * item.quantityAvailable;
++  }, 0);
+   const closeReceipt = () => { setFormState(initialFormState); setReceiptOpen(false); if (queryFlag(path, "receipt")) onNavigate("/inventory"); };
+   const submitWarehouse = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request<Warehouse>("/api/v1/inventory/warehouses", { method: "POST", body: JSON.stringify({ code: textValue(form, "code"), name: textValue(form, "name") }) }); onNotice("انبار جدید ثبت شد."); setFormState(initialFormState); setWarehouseOpen(false); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+   const submitReceipt = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request("/api/v1/inventory/receipts", { method: "POST", body: JSON.stringify({ warehouseId: textValue(form, "warehouseId"), productVariantId: textValue(form, "variantId"), quantity: numberValue(form, "quantity"), referenceType: "DesktopReceipt", reason: optionalText(form, "reason") }) }); onNotice("رسید انبار ثبت و موجودی به‌روزرسانی شد."); closeReceipt(); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+-  return <ModuleBody><PageHeader icon={Boxes} title="انبار" description="موجودی واقعی هر انبار، رزرو، قیمت خرید میانگین و مقدار قابل فروش." actionLabel="موجودی اولیه / اصلاح" onAction={() => { setFormState(initialFormState); setReceiptOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/suppliers?purchase=1")}>خرید از تأمین‌کننده</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setWarehouseOpen(true); }}>انبار جدید</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />
+-    <div className="module-metrics-grid"><MetricTile label="انبار فعال" value={String(data.warehouses.filter((item) => item.isActive).length)} hint="محل نگهداری" /><MetricTile label="موجودی کل" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0))} hint="قطعه" /><MetricTile label="قابل فروش" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="پس از رزرو" /></div>
+-    {data.inventoryItems.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>انبار</th><th>محصول / مدل</th><th>موجودی</th><th>رزرو</th><th>قابل فروش</th><th>میانگین قیمت خرید</th></tr></thead><tbody>{data.inventoryItems.map((item) => { const variant = variants.find((value) => value.id === item.productVariantId); return <tr key={item.id}><td>{data.warehouses.find((value) => value.id === item.warehouseId)?.name || "—"}</td><td>{variant ? `${variant.productName} · ${variant.name}` : item.productVariantId}<small>{variant?.sku}</small></td><td>{item.quantityOnHand}</td><td>{item.quantityReserved}</td><td><strong>{item.quantityAvailable}</strong></td><td>{item.hasAcquisitionCost ? formatMoney(item.averageUnitCostRials) : <span className="muted-text">ثبت نشده</span>}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="موجودی ثبت نشده" description="ابتدا انبار و مدل محصول را بساز، سپس خرید را از صفحه تأمین‌کنندگان ثبت کن." />}
++  return <ModuleBody><ReferencePageHeader eyebrow="گاوصندوق‌ها" title="انبار جواهرات" description="همه قطعات ثبت‌شده — عیار، نگین، ارزش‌گذاری و محل نگهداری." actionLabel="افزودن قطعه" onAction={() => onNavigate("/suppliers?purchase=1")} /><DataNotice />
++    <div className="module-metrics-grid reference-inventory-metrics"><MetricTile label="قطعات موجود" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0))} hint="ثبت‌شده در گاوصندوق‌ها" /><MetricTile label="ارزش گاوصندوق" value={formatMoney(vaultValue)} hint="بر پایه آخرین قیمت فروش یا بهای خرید" /><MetricTile label="هشدار موجودی کم" value={String(data.inventoryItems.filter((item) => item.quantityAvailable <= 2).length)} hint="دو قطعه یا کمتر" /></div>
++    <section className="reference-filter-bar reference-filter-bar--inventory fade-up" aria-label="جست‌وجوی انبار">
++      <label className="reference-search"><Search size={16} /><input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="جست‌وجو بر اساس نام یا کد کالا" /></label>
++      <div className="reference-inline-actions"><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setWarehouseOpen(true); }}>انبار جدید</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setReceiptOpen(true); }}>موجودی اولیه / اصلاح</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></div>
++    </section>
++    {filteredInventory.length ? <TableCard><div className="table-scroll"><table className="data-table reference-inventory-table"><thead><tr><th>کد کالا</th><th>قطعه</th><th>عیار</th><th>وزن</th><th>نگین</th><th>وزن نگین</th><th>بهای تمام‌شده</th><th>ارزش</th><th>قیمت</th><th>تأمین‌کننده</th><th>تعداد</th><th>محل نگهداری</th></tr></thead><tbody>{filteredInventory.map((item) => { const variant = variants.find((value) => value.id === item.productVariantId); const purchase = latestPurchases.get(item.productVariantId); const unitValue = purchase?.sellingUnitPriceRials ?? item.averageUnitCostRials; return <tr key={item.id}><td className="numeric-cell"><strong>{variant?.sku || "—"}</strong></td><td>{variant ? `${variant.productName} · ${variant.name}` : item.productVariantId}</td><td>{variant?.goldDetail?.karat || "—"}</td><td>{variant?.goldDetail ? `${variant.goldDetail.grossWeight} گرم` : "—"}</td><td>{variant?.goldDetail?.hasStone ? "دارد" : "ندارد"}</td><td>{variant?.goldDetail?.stoneWeight ? `${variant.goldDetail.stoneWeight} گرم` : "—"}</td><td>{item.hasAcquisitionCost ? formatMoney(item.averageUnitCostRials) : <span className="muted-text">ثبت نشده</span>}</td><td>{formatMoney(unitValue * item.quantityAvailable)}</td><td>{purchase ? formatMoney(purchase.sellingUnitPriceRials) : "ثبت نشده"}</td><td>{purchase?.supplierName || "—"}</td><td><strong>{item.quantityAvailable}</strong></td><td>{data.warehouses.find((value) => value.id === item.warehouseId)?.name || "—"}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="قطعه‌ای با این جست‌وجو پیدا نشد" description="قطعه جدید را از تأمین‌کننده ثبت کن تا قیمت خرید، قیمت فروش و موجودی هم‌زمان ذخیره شوند." />}
+     <Modal open={warehouseOpen} title="ساخت انبار" onClose={() => { setFormState(initialFormState); setWarehouseOpen(false); }}><form className="entity-form" onSubmit={submitWarehouse}><FormField label="کد انبار"><input name="code" dir="ltr" required /></FormField><FormField label="نام انبار"><input name="name" required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت انبار" onCancel={() => { setFormState(initialFormState); setWarehouseOpen(false); }} /></form></Modal>
+     <Modal open={receiptOpen} title="موجودی اولیه / اصلاح" description="این فرم قیمت خرید ندارد و فقط برای ورود اولیه یا اصلاح فنی است. خرید واقعی را از صفحه تأمین‌کنندگان ثبت کن." onClose={closeReceipt}><form className="entity-form" onSubmit={submitReceipt}><FormField label="انبار"><select name="warehouseId" required><option value="">انتخاب کن</option>{data.warehouses.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField><FormField label="مدل کالا"><select name="variantId" required><option value="">انتخاب کن</option>{variants.filter((item) => item.isActive).map((item) => <option value={item.id} key={item.id}>{item.productName} · {item.name} ({item.sku})</option>)}</select></FormField><FormField label="تعداد"><input name="quantity" type="number" min="1" defaultValue="1" required /></FormField><FormField label="علت اصلاح"><input name="reason" placeholder="موجودی اولیه / اصلاح شمارش" required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت موجودی" onCancel={closeReceipt} /></form></Modal>
+   </ModuleBody>;
+@@ -739,6 +947,10 @@ function InventoryPage({ path, onNavigate, onNotice }: RouteProps) {
+ 
+ function OrdersPage(props: RouteProps) {
+   const { data, request, refresh, refreshing } = useOperations();
++  const requestedCustomerId = queryValue(props.path, "customerId");
++  const visibleOrders = requestedCustomerId
++    ? data.orders.filter((order) => order.customerId === requestedCustomerId)
++    : data.orders;
+   const [settleOrder, setSettleOrder] = useState<Order | null>(queryFlag(props.path, "settle") ? data.orders.find((item) => !["Paid", "Completed", "Cancelled"].includes(item.status)) || null : null);
+   const [formState, setFormState] = useState<FormState>(initialFormState);
+   useEffect(() => {
+@@ -747,9 +959,10 @@ function OrdersPage(props: RouteProps) {
+   }, [data.orders, props.path, settleOrder]);
+   const closeSettlement = () => { setFormState(initialFormState); setSettleOrder(null); if (queryFlag(props.path, "settle")) props.onNavigate("/orders"); };
+   const submitPayment = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!settleOrder) return; const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { const payment = await request<Payment>("/api/v1/payments/manual", { method: "POST", headers: { "Idempotency-Key": createIdempotencyKey("manual-payment") }, body: JSON.stringify({ orderId: settleOrder.id, method: textValue(form, "method"), reference: optionalText(form, "reference") }) }); setSettleOrder(null); setFormState(initialFormState); await refresh(); if (payment.invoiceId) { props.onNotice("پرداخت تأیید و فاکتور صادر شد؛ پیش‌نمایش فاکتور باز شد."); props.onNavigate(`/invoices?open=${payment.invoiceId}`); } else { props.onNotice("پرداخت ثبت شد."); props.onNavigate("/orders"); } } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+-  return <ModuleBody><PageHeader icon={ShoppingBag} title="سفارش‌ها" description="سفارش، رزرو موجودی، پرداخت و صدور فاکتور در یک گردش‌کار." actionLabel="سفارش جدید" onAction={() => props.onNavigate("/orders/new")} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice />
+-    <div className="module-metrics-grid"><MetricTile label="کل سفارش‌ها" value={String(data.orders.length)} hint="همه وضعیت‌ها" /><MetricTile label="در انتظار پرداخت" value={String(data.orders.filter((item) => ["Pending","AwaitingPayment","PaymentReview"].includes(item.status)).length)} hint="نیازمند اقدام" /><MetricTile label="فروش سفارش‌ها" value={formatMoney(data.orders.filter((item) => item.status !== "Cancelled").reduce((sum, item) => sum + item.grandTotalRials, 0))} hint="غیرلغوشده" /></div>
+-    {data.orders.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شماره</th><th>مشتری</th><th>اقلام</th><th>مبلغ</th><th>وضعیت</th><th /></tr></thead><tbody>{data.orders.map((order) => <tr key={order.id}><td>{order.orderNumber}</td><td>{order.customerNameSnapshot || "مشتری"}</td><td>{order.items.length}</td><td>{formatMoney(order.grandTotalRials)}</td><td><StatusBadge status={order.status} /></td><td>{!["Paid","Completed","Cancelled","Refunded"].includes(order.status) && <button className="row-action" type="button" onClick={() => { setFormState(initialFormState); setSettleOrder(order); }}>ثبت پرداخت</button>}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="سفارشی ثبت نشده" description="سفارش جدید، موجودی را رزرو می‌کند و بعد از تسویه فاکتور صادر می‌شود." />}
++  return <ModuleBody><PageHeader icon={ShoppingBag} title="سفارش‌ها" description="سفارش، رزرو موجودی، پرداخت و صدور فاکتور در یک گردش‌کار." actionLabel="سفارش جدید" onAction={() => props.onNavigate(requestedCustomerId ? `/orders/new?customerId=${requestedCustomerId}` : "/orders/new")} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice />
++    {requestedCustomerId && <div className="reference-active-filter">سفارش‌های {data.customers.find((customer) => customer.id === requestedCustomerId)?.displayName || "مشتری"}<button type="button" onClick={() => props.onNavigate("/orders")}>نمایش همه</button></div>}
++    <div className="module-metrics-grid"><MetricTile label="کل سفارش‌ها" value={String(visibleOrders.length)} hint="همه وضعیت‌ها" /><MetricTile label="در انتظار پرداخت" value={String(visibleOrders.filter((item) => ["Pending","AwaitingPayment","PaymentReview"].includes(item.status)).length)} hint="نیازمند اقدام" /><MetricTile label="فروش سفارش‌ها" value={formatMoney(visibleOrders.filter((item) => item.status !== "Cancelled").reduce((sum, item) => sum + item.grandTotalRials, 0))} hint="غیرلغوشده" /></div>
++    {visibleOrders.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شماره</th><th>مشتری</th><th>اقلام</th><th>مبلغ</th><th>وضعیت</th><th /></tr></thead><tbody>{visibleOrders.map((order) => <tr key={order.id}><td>{order.orderNumber}</td><td>{order.customerNameSnapshot || "مشتری"}</td><td>{order.items.length}</td><td>{formatMoney(order.grandTotalRials)}</td><td><StatusBadge status={order.status} /></td><td>{!["Paid","Completed","Cancelled","Refunded"].includes(order.status) && <button className="row-action" type="button" onClick={() => { setFormState(initialFormState); setSettleOrder(order); }}>ثبت پرداخت</button>}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="سفارشی ثبت نشده" description="سفارش جدید، موجودی را رزرو می‌کند و بعد از تسویه فاکتور صادر می‌شود." />}
+     <Modal open={Boolean(settleOrder)} title={`تسویه ${settleOrder?.orderNumber || "سفارش"}`} description={settleOrder ? `مبلغ قابل پرداخت: ${formatMoney(settleOrder.grandTotalRials)}` : undefined} onClose={closeSettlement}><form className="entity-form" onSubmit={submitPayment}><FormField label="روش پرداخت"><select name="method"><option value="Cash">نقدی</option><option value="PointOfSale">کارت‌خوان</option><option value="BankTransfer">حواله بانکی</option><option value="CardToCard">کارت‌به‌کارت</option></select></FormField><FormField label="شماره پیگیری"><input name="reference" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت پرداخت و صدور فاکتور" onCancel={closeSettlement} /></form></Modal>
+   </ModuleBody>;
+ }
+@@ -851,22 +1064,121 @@ function AccountingPage() {
+   </ModuleBody>;
+ }
+ 
+-function ReportsPage() {
++function ReportsPage({ path, onNavigate }: RouteProps) {
+   const { data, refresh, refreshing } = useOperations();
+-  const today = new Date().toDateString();
+-  const todayInvoices = data.invoices.filter((item) => item.status !== "Voided" && new Date(item.issuedAt).toDateString() === today);
+-  const sales = todayInvoices.reduce((sum, item) => sum + item.grandTotalRials, 0);
+-  const profit = todayInvoices.reduce((sum, invoice) => sum + invoiceActualProfit(invoice), 0);
+-  return <ModuleBody><PageHeader icon={BarChart3} title="گزارش‌ها" description="گزارش عملیاتی بر پایه داده‌های فاکتور، سفارش، کالا و انبار." secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="فروش امروز" value={formatMoney(sales)} hint={`${todayInvoices.length} فاکتور`} /><MetricTile label="سود واقعی امروز" value={formatMoney(profit)} hint="فروش منهای خرید و تخفیف" /><MetricTile label="موجودی قابل فروش" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="قطعه" /><MetricTile label="مشتری فعال" value={String(data.customers.filter((item) => item.isActive).length)} hint="حساب" /></div>
+-    <div className="reports-grid"><section className="lux-card report-card"><h2>وضعیت سفارش‌ها</h2>{["Pending","AwaitingPayment","Paid","Processing","Completed","Cancelled"].map((status) => <div className="report-row" key={status}><span>{translateStatus(status)}</span><strong>{data.orders.filter((item) => item.status === status).length}</strong></div>)}</section><section className="lux-card report-card"><h2>محصولات پرفروش</h2>{data.products.map((product) => ({ product, count: data.invoices.filter((invoice) => invoice.status !== "Voided").flatMap((item) => item.items).filter((line) => line.productName === product.name).reduce((sum, line) => sum + line.quantity, 0) })).sort((a,b) => b.count-a.count).slice(0,6).map((item) => <div className="report-row" key={item.product.id}><span>{item.product.name}</span><strong>{item.count}</strong></div>)}{!data.products.length && <p>داده‌ای ثبت نشده است.</p>}</section></div>
+-  </ModuleBody>;
++  const reportRoute = routeBase(path);
++  const now = new Date();
++  const activeInvoices = data.invoices.filter((invoice) => invoice.status !== "Voided");
++  const todayInvoices = activeInvoices.filter((invoice) => new Date(invoice.issuedAt).toDateString() === now.toDateString());
++  const monthInvoices = activeInvoices.filter((invoice) => {
++    const date = new Date(invoice.issuedAt);
++    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
++  });
++  const yearInvoices = activeInvoices.filter((invoice) => new Date(invoice.issuedAt).getFullYear() === now.getFullYear());
++  const reportHeader = (title: string, description: string) => <ReferencePageHeader eyebrow="هوش تجاری" title={title} description={description} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/reports")}>بازگشت</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} />;
++
++  if (reportRoute === "/reports") {
++    return <ModuleBody>
++      <ReferencePageHeader eyebrow="هوش تجاری" title="گزارش‌ها" description="گزارش‌های شکیل و قابل خروجی‌گیری از فروش، انبار، مشتریان و امور مالی." />
++      <DataNotice />
++      <div className="reference-feature-grid reference-report-grid">
++        <FeatureNavigationCard title="فروش" description="درآمد روزانه، هفتگی، ماهانه و سالانه با تفکیک کلکسیون." meta={`${activeInvoices.length} فاکتور واقعی`} onClick={() => onNavigate("/reports/sales")} />
++        <FeatureNavigationCard title="معاملات طلا" description="وضعیت خرید و فروش، اختلاف قیمت محقق‌شده و یادداشت‌های پوشش ریسک." meta={`${data.supplierPurchases.length} خرید ثبت‌شده`} onClick={() => onNavigate("/reports/gold")} />
++        <FeatureNavigationCard title="انبار" description="گردش موجودی، قطعات راکد و ارزش‌گذاری گاوصندوق." meta={`${data.inventoryItems.length} ردیف موجودی`} onClick={() => onNavigate("/reports/inventory")} />
++        <FeatureNavigationCard title="مشتریان و اقساط" description="سطوح وفاداری، نرخ وصول و اقساط معوق." meta={`${data.customers.length} مشتری`} onClick={() => onNavigate("/reports/customers")} />
++        <FeatureNavigationCard title="سود و مالیات" description="تحلیل حاشیه سود در کنار ذخایر مالیات و عوارض." meta={formatMoney(activeInvoices.reduce((sum, invoice) => sum + invoiceActualProfit(invoice), 0))} onClick={() => onNavigate("/reports/profit-tax")} />
++      </div>
++    </ModuleBody>;
++  }
++
++  if (reportRoute === "/reports/sales") {
++    const productSales = new Map<string, { quantity: number; revenue: number }>();
++    activeInvoices.flatMap((invoice) => invoice.items).forEach((item) => {
++      const current = productSales.get(item.productName) || { quantity: 0, revenue: 0 };
++      current.quantity += item.quantity;
++      current.revenue += item.lineTotalRials;
++      productSales.set(item.productName, current);
++    });
++    return <ModuleBody>{reportHeader("فروش", "درآمد واقعی روزانه، ماهانه و سالانه با تفکیک محصول و تعداد فروش.")}<DataNotice />
++      <div className="module-metrics-grid"><MetricTile label="فروش امروز" value={formatMoney(todayInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0))} hint={`${todayInvoices.length} فاکتور`} /><MetricTile label="درآمد ماهانه" value={formatMoney(monthInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0))} hint={`${monthInvoices.length} فاکتور`} /><MetricTile label="درآمد سالانه" value={formatMoney(yearInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0))} hint={`${yearInvoices.length} فاکتور`} /></div>
++      {productSales.size ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>محصول</th><th>تعداد فروش</th><th>درآمد</th><th>سهم از فروش</th></tr></thead><tbody>{[...productSales.entries()].sort(([, left], [, right]) => right.revenue - left.revenue).map(([name, values]) => { const total = activeInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0); return <tr key={name}><td><strong>{name}</strong></td><td>{values.quantity}</td><td>{formatMoney(values.revenue)}</td><td>{total ? `${Math.round(values.revenue / total * 100)}٪` : "۰٪"}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="فروشی ثبت نشده" description="پس از صدور فاکتور، درآمد واقعی این گزارش تکمیل می‌شود." />}
++    </ModuleBody>;
++  }
++
++  if (reportRoute === "/reports/gold") {
++    const purchaseCost = data.supplierPurchases.reduce((sum, purchase) => sum + purchase.totalCostRials, 0);
++    const expectedSales = data.supplierPurchases.reduce((sum, purchase) => sum + purchase.sellingUnitPriceRials * purchase.quantity, 0);
++    return <ModuleBody>{reportHeader("معاملات طلا", "خریدهای ثبت‌شده از تأمین‌کنندگان، قیمت فروش و اختلاف واقعی هر معامله.")}<DataNotice />
++      <div className="module-metrics-grid"><MetricTile label="حجم خرید" value={formatMoney(purchaseCost)} hint={`${data.supplierPurchases.length} سند`} /><MetricTile label="ارزش فروش مورد انتظار" value={formatMoney(expectedSales)} hint="بر پایه قیمت ثبت‌شده" /><MetricTile label="اختلاف قیمت" value={formatMoney(expectedSales - purchaseCost)} hint="پیش از تخفیف" /></div>
++      {data.supplierPurchases.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>سند</th><th>قطعه</th><th>تأمین‌کننده</th><th>تعداد</th><th>قیمت خرید</th><th>قیمت فروش</th><th>اختلاف</th><th>تاریخ</th></tr></thead><tbody>{data.supplierPurchases.map((purchase) => <tr key={purchase.id}><td className="numeric-cell">{purchase.purchaseNumber}</td><td><strong>{purchase.productName}</strong><small>{purchase.sku}</small></td><td>{purchase.supplierName}</td><td>{purchase.quantity}</td><td>{formatMoney(purchase.unitCostRials)}</td><td>{formatMoney(purchase.sellingUnitPriceRials)}</td><td className={purchase.expectedTotalProfitRials < 0 ? "negative-text" : "positive-text"}>{formatMoney(purchase.expectedTotalProfitRials)}</td><td>{formatDateOnly(purchase.purchasedAt)}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="معامله طلا ثبت نشده" description="خرید را از بخش تأمین‌کنندگان ثبت کن تا این گزارش از بک‌اند تکمیل شود." />}
++    </ModuleBody>;
++  }
++
++  if (reportRoute === "/reports/inventory") {
++    const latestPurchase = (variantId: string) => data.supplierPurchases.filter((purchase) => purchase.productVariantId === variantId).sort((left, right) => new Date(right.purchasedAt).getTime() - new Date(left.purchasedAt).getTime())[0];
++    const costValue = data.inventoryItems.reduce((sum, item) => sum + item.averageUnitCostRials * item.quantityAvailable, 0);
++    const saleValue = data.inventoryItems.reduce((sum, item) => sum + (latestPurchase(item.productVariantId)?.sellingUnitPriceRials ?? item.averageUnitCostRials) * item.quantityAvailable, 0);
++    const variants = data.products.flatMap((product) => product.variants.map((variant) => ({ ...variant, productName: product.name })));
++    return <ModuleBody>{reportHeader("انبار", "موجودی قابل فروش، قطعات کم‌موجود و ارزش‌گذاری واقعی گاوصندوق.")}<DataNotice />
++      <div className="module-metrics-grid"><MetricTile label="قطعات موجود" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="قابل فروش" /><MetricTile label="بهای موجودی" value={formatMoney(costValue)} hint="میانگین خرید" /><MetricTile label="ارزش گاوصندوق" value={formatMoney(saleValue)} hint="قیمت فروش فعلی" /><MetricTile label="هشدار موجودی کم" value={String(data.inventoryItems.filter((item) => item.quantityAvailable <= 2).length)} hint="نیازمند تأمین" /></div>
++      {data.inventoryItems.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>کد کالا</th><th>قطعه</th><th>انبار</th><th>موجود</th><th>رزرو</th><th>بهای موجودی</th><th>ارزش فروش</th></tr></thead><tbody>{data.inventoryItems.map((item) => { const variant = variants.find((entry) => entry.id === item.productVariantId); const selling = latestPurchase(item.productVariantId)?.sellingUnitPriceRials ?? item.averageUnitCostRials; return <tr key={item.id}><td>{variant?.sku || "—"}</td><td>{variant ? `${variant.productName} · ${variant.name}` : "—"}</td><td>{data.warehouses.find((warehouse) => warehouse.id === item.warehouseId)?.name || "—"}</td><td>{item.quantityAvailable}</td><td>{item.quantityReserved}</td><td>{formatMoney(item.averageUnitCostRials * item.quantityAvailable)}</td><td>{formatMoney(selling * item.quantityAvailable)}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="موجودی ثبت نشده" description="موجودی واقعی پس از ثبت خرید تأمین‌کننده اینجا نمایش داده می‌شود." />}
++    </ModuleBody>;
++  }
++
++  if (reportRoute === "/reports/customers") {
++    return <ModuleBody>{reportHeader("مشتریان و اقساط", "سطح خرید، مانده تسویه و نرخ وصول هر مشتری بر پایه سفارش‌ها و فاکتورها.")}<DataNotice />
++      {data.customers.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>مشتری</th><th>خریدها</th><th>مجموع خرید</th><th>مانده بدهی</th><th>نرخ وصول</th><th>آخرین فعالیت</th></tr></thead><tbody>{data.customers.map((customer) => { const orders = data.orders.filter((order) => order.customerId === customer.id && order.status !== "Cancelled"); const invoices = activeInvoices.filter((invoice) => invoice.customerId === customer.id); const purchaseTotal = invoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0); const outstanding = orders.filter((order) => !["Paid", "Completed", "Refunded"].includes(order.status)).reduce((sum, order) => sum + order.grandTotalRials, 0); const settled = orders.filter((order) => ["Paid", "Completed"].includes(order.status)).length; return <tr key={customer.id}><td><strong>{customer.displayName}</strong><small>{customer.phoneNumber || "—"}</small></td><td>{customer.orderCount}</td><td>{formatMoney(purchaseTotal)}</td><td className={outstanding > 0 ? "negative-text" : ""}>{formatMoney(outstanding)}</td><td>{orders.length ? `${Math.round(settled / orders.length * 100)}٪` : "۰٪"}</td><td>{formatDate(customer.lastActivityAt)}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="مشتری ثبت نشده" description="با ثبت مشتری و سفارش، نرخ وصول واقعی در این گزارش محاسبه می‌شود." />}
++    </ModuleBody>;
++  }
++
++  if (reportRoute === "/reports/profit-tax") {
++    const profit = activeInvoices.reduce((sum, invoice) => sum + invoiceActualProfit(invoice), 0);
++    const tax = activeInvoices.flatMap((invoice) => invoice.items).reduce((sum, item) => sum + (item.taxRials ?? 0), 0);
++    const revenue = activeInvoices.reduce((sum, invoice) => sum + invoice.grandTotalRials, 0);
++    return <ModuleBody>{reportHeader("سود و مالیات", "حاشیه سود ثبت‌شده روی اقلام فاکتور در کنار مالیات و عوارض واقعی.")}<DataNotice />
++      <div className="module-metrics-grid"><MetricTile label="درآمد" value={formatMoney(revenue)} hint={`${activeInvoices.length} فاکتور`} /><MetricTile label="سود" value={formatMoney(profit)} hint="پس از بهای خرید و تخفیف" /><MetricTile label="مالیات و عوارض" value={formatMoney(tax)} hint="ثبت‌شده روی اقلام" /><MetricTile label="حاشیه سود" value={revenue ? `${(profit / revenue * 100).toLocaleString(activeNumberLocale(), { maximumFractionDigits: 1 })}٪` : "۰٪"} hint="سود به درآمد" /></div>
++      {activeInvoices.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>فاکتور</th><th>مشتری</th><th>درآمد</th><th>سود</th><th>مالیات</th><th>تاریخ</th></tr></thead><tbody>{activeInvoices.map((invoice) => <tr key={invoice.id}><td className="numeric-cell">{invoice.invoiceNumber}</td><td>{invoice.customerNameSnapshot || "مشتری"}</td><td>{formatMoney(invoice.grandTotalRials)}</td><td className={invoiceActualProfit(invoice) < 0 ? "negative-text" : "positive-text"}>{formatMoney(invoiceActualProfit(invoice))}</td><td>{formatMoney(invoice.items.reduce((sum, item) => sum + (item.taxRials ?? 0), 0))}</td><td>{formatDateOnly(invoice.issuedAt)}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="فاکتوری ثبت نشده" description="پس از صدور فاکتور، سود و مالیات واقعی هر سند نمایش داده می‌شود." />}
++    </ModuleBody>;
++  }
++
++  return <ModuleBody><EmptyState title="گزارش پیدا نشد" description="یکی از کارت‌های گزارش را انتخاب کن." /></ModuleBody>;
+ }
+ 
+-function EmployeesPage({ onNotice }: RouteProps) {
++function EmployeesPage({ path, onNavigate, onNotice }: RouteProps) {
+   const { data, request, refresh, refreshing } = useOperations(); const [open, setOpen] = useState(false); const [formState, setFormState] = useState<FormState>(initialFormState);
+   const close = () => { setFormState(initialFormState); setOpen(false); };
+   const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request<Person>("/api/v1/people/employees", { method: "POST", body: JSON.stringify({ displayName: textValue(form,"displayName"), email: textValue(form,"email"), phoneNumber: optionalText(form,"phoneNumber"), temporaryPassword: textValue(form,"temporaryPassword") }) }); onNotice("کارمند مدیر ثبت شد؛ در اولین ورود باید MFA را فعال کند."); close(); await refresh(); } catch (error) { setFormState({ saving:false,error:messageOf(error) }); } };
+-  return <ModuleBody><PageHeader icon={IdCard} title="کارکنان" description="مالک و مدیران سیستم از جدول امنیت و نقش‌ها خوانده می‌شوند." actionLabel="مدیر جدید" onAction={() => { setFormState(initialFormState); setOpen(true); }} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice />{data.employees.length ? <div className="card-grid">{data.employees.map((employee) => <article className="lux-card person-card" key={employee.id}><span className="large-avatar">{employee.displayName.slice(0,1)}</span><div><h3>{employee.displayName}</h3><p>{employee.email}</p><div className="chip-list">{employee.roles.map((role) => <span key={role}>{translateStatus(role)}</span>)}<span>{employee.mfaEnabled ? "MFA فعال" : "MFA در انتظار"}</span></div></div><StatusBadge status={employee.isActive ? "Active" : "Inactive"} /></article>)}</div> : <EmptyState title="کارمندی یافت نشد" description="حساب مالک فعلی باید دست‌کم در این لیست نمایش داده شود." />}<Modal open={open} title="ثبت مدیر جدید" description="حساب مدیر ملزم به فعال‌سازی MFA است." onClose={close}><form className="entity-form" onSubmit={submit}><FormField label="نام کامل"><input name="displayName" required /></FormField><FormField label="ایمیل"><input name="email" type="email" required /></FormField><FormField label="تلفن"><input name="phoneNumber" /></FormField><FormField label="رمز موقت"><input name="temporaryPassword" type="password" minLength={12} required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت مدیر" onCancel={close} /></form></Modal></ModuleBody>;
++  const employeeRoute = routeBase(path);
++  if (employeeRoute === "/employees") {
++    return <ModuleBody>
++      <ReferencePageHeader eyebrow="منابع انسانی" title="کارکنان" description="کارکنان بوتیک، هنرمندان آتلیه و پورسانت‌های آن‌ها." />
++      <DataNotice />
++      <div className="reference-feature-grid reference-feature-grid--three">
++        <FeatureNavigationCard title="فهرست کارکنان" description="مشاوران بوتیک، گوهرشناسان، حکاکان و کارکنان پشتیبانی." meta={`${data.employees.length} حساب کاربری`} onClick={() => onNavigate("/employees/list")} />
++        <FeatureNavigationCard title="پورسانت‌ها" description="پورسانت مشاوران بابت فاکتورهای تسویه‌شده، پرداخت ماهانه." meta={`${data.invoices.filter((invoice) => invoice.status !== "Voided").length} فاکتور`} onClick={() => onNavigate("/employees/commissions")} />
++        <FeatureNavigationCard title="برنامه کاری" description="شیفت‌ها، نوبت‌کاری آتلیه و تقویم مرخصی." meta={`${data.employees.filter((employee) => employee.isActive).length} کارمند فعال`} onClick={() => onNavigate("/employees/schedule")} />
++      </div>
++    </ModuleBody>;
++  }
++  if (employeeRoute === "/employees/commissions") {
++    const settledSales = data.invoices.filter((invoice) => invoice.status !== "Voided").reduce((sum, invoice) => sum + invoice.grandTotalRials, 0);
++    return <ModuleBody>
++      <ReferencePageHeader eyebrow="منابع انسانی" title="پورسانت‌ها" description="پورسانت مشاوران بابت فاکتورهای تسویه‌شده و وضعیت پرداخت ماهانه." secondary={<button className="secondary-button" type="button" onClick={() => onNavigate("/employees")}>بازگشت</button>} />
++      <DataNotice />
++      <div className="module-metrics-grid"><MetricTile label="کارکنان فعال" value={String(data.employees.filter((employee) => employee.isActive).length)} hint="حساب بک‌اند" /><MetricTile label="فروش تسویه‌شده" value={formatMoney(settledSales)} hint="بدون انتساب کارمند" /></div>
++      <div className="inline-help">بک‌اند فعلی هنوز شناسه فروشنده را روی فاکتور ذخیره نمی‌کند؛ بنابراین پورسانت ساختگی محاسبه نشده و تا زمان اضافه‌شدن این ارتباط با «—» نمایش داده می‌شود.</div>
++      {data.employees.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>کارمند</th><th>نقش</th><th>فاکتور منتسب</th><th>فروش منتسب</th><th>پورسانت</th><th>وضعیت</th></tr></thead><tbody>{data.employees.map((employee) => <tr key={employee.id}><td><strong>{employee.displayName}</strong><small>{employee.email || employee.phoneNumber || "—"}</small></td><td>{employee.roles.map(translateStatus).join("، ")}</td><td>—</td><td>—</td><td>—</td><td><StatusBadge status={employee.isActive ? "Active" : "Inactive"} /></td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="کارمندی یافت نشد" description="پس از ثبت کارمند، حساب واقعی او در این گزارش دیده می‌شود." />}
++    </ModuleBody>;
++  }
++  if (employeeRoute === "/employees/schedule") {
++    return <ModuleBody>
++      <ReferencePageHeader eyebrow="منابع انسانی" title="برنامه کاری" description="وضعیت حضور سیستمی، نقش و آخرین فعالیت کارکنان ثبت‌شده." secondary={<button className="secondary-button" type="button" onClick={() => onNavigate("/employees")}>بازگشت</button>} />
++      <DataNotice />
++      <div className="inline-help">مدل شیفت و مرخصی هنوز در بک‌اند تعریف نشده است؛ این صفحه فقط وضعیت واقعی حساب‌ها و آخرین فعالیت را نشان می‌دهد.</div>
++      {data.employees.length ? <div className="reference-employee-grid">{data.employees.map((employee) => <article className="lux-card reference-roster-card" key={employee.id}><span className="large-avatar">{initialsOf(employee.displayName)}</span><div><h2>{employee.displayName}</h2><p>{employee.roles.map(translateStatus).join("، ") || "کارمند"}</p><small>آخرین فعالیت: {formatDate(employee.lastActivityAt)}</small></div><StatusBadge status={employee.isActive ? "Active" : "Inactive"} /></article>)}</div> : <EmptyState title="برنامه‌ای برای نمایش وجود ندارد" description="ابتدا حساب کارکنان را از فهرست کارکنان ثبت کن." />}
++    </ModuleBody>;
++  }
++  return <ModuleBody><ReferencePageHeader eyebrow="منابع انسانی" title="فهرست کارکنان" description="مشاوران بوتیک، گوهرشناسان، حکاکان و کارکنان پشتیبانی." actionLabel="مدیر جدید" onAction={() => { setFormState(initialFormState); setOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/employees")}>بازگشت</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />{data.employees.length ? <div className="reference-employee-grid">{data.employees.map((employee) => <article className="lux-card person-card" key={employee.id}><span className="large-avatar">{initialsOf(employee.displayName)}</span><div><h3>{employee.displayName}</h3><p>{employee.email}</p><div className="chip-list">{employee.roles.map((role) => <span key={role}>{translateStatus(role)}</span>)}<span>{employee.mfaEnabled ? "MFA فعال" : "MFA در انتظار"}</span></div></div><StatusBadge status={employee.isActive ? "Active" : "Inactive"} /></article>)}</div> : <EmptyState title="کارمندی یافت نشد" description="حساب مالک فعلی باید دست‌کم در این لیست نمایش داده شود." />}<Modal open={open} title="ثبت مدیر جدید" description="حساب مدیر ملزم به فعال‌سازی MFA است." onClose={close}><form className="entity-form" onSubmit={submit}><FormField label="نام کامل"><input name="displayName" required /></FormField><FormField label="ایمیل"><input name="email" type="email" required /></FormField><FormField label="تلفن"><input name="phoneNumber" /></FormField><FormField label="رمز موقت"><input name="temporaryPassword" type="password" minLength={12} required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت مدیر" onCancel={close} /></form></Modal></ModuleBody>;
+ }
+ 
+ function SuppliersPage({ path, onNavigate, onNotice }: RouteProps) {
+@@ -914,12 +1226,12 @@ function SuppliersPage({ path, onNavigate, onNotice }: RouteProps) {
+   </ModuleBody>;
+ }
+ 
+-function CrmPage({ onNotice }: RouteProps) {
+-  const {data,request,refresh,refreshing}=useOperations();const[open,setOpen]=useState(false);const[formState,setFormState]=useState<FormState>(initialFormState);
++function CrmPage({ path, onNavigate, onNotice }: RouteProps) {
++  const {data,request,refresh,refreshing}=useOperations();const[open,setOpen]=useState(false);const[formState,setFormState]=useState<FormState>(initialFormState);const requestedCustomerId=queryValue(path,"customerId");const visibleInteractions=requestedCustomerId?data.interactions.filter(item=>item.customerId===requestedCustomerId):data.interactions;
+   const close=()=>{setFormState(initialFormState);setOpen(false);};
+   const submit=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=new FormData(event.currentTarget);setFormState({saving:true,error:null});try{const followUp=textValue(form,"nextFollowUpAt");await request<CustomerInteraction>("/api/v1/crm/interactions",{method:"POST",body:JSON.stringify({customerId:textValue(form,"customerId"),interactionType:textValue(form,"interactionType"),subject:textValue(form,"subject"),notes:optionalText(form,"notes"),occurredAt:new Date().toISOString(),nextFollowUpAt:followUp?new Date(followUp).toISOString():null})});onNotice("تعامل مشتری و پیگیری آن ثبت شد.");close();await refresh();}catch(error){setFormState({saving:false,error:messageOf(error)});}};
+   const complete=async(interaction:CustomerInteraction)=>{try{await request(`/api/v1/crm/interactions/${interaction.id}/status`,{method:"POST",body:JSON.stringify({status:"Completed",rowVersion:interaction.rowVersion})});onNotice("پیگیری تکمیل شد.");await refresh();}catch(error){onNotice(messageOf(error));}};
+-  return <ModuleBody><PageHeader icon={HeartHandshake} title="ارتباط با مشتری" description="تماس‌ها، جلسات، یادداشت‌ها و پیگیری‌های آینده." actionLabel="تعامل جدید" onAction={()=>{setFormState(initialFormState);setOpen(true);}} secondary={<RefreshButton refreshing={refreshing} onClick={()=>void refresh()}/>} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="تعامل‌ها" value={String(data.interactions.length)} hint="همه رکوردها"/><MetricTile label="پیگیری باز" value={String(data.interactions.filter(item=>item.status==="Open").length)} hint="نیازمند اقدام"/><MetricTile label="تکمیل‌شده" value={String(data.interactions.filter(item=>item.status==="Completed").length)} hint="بسته‌شده"/></div>{data.interactions.length?<div className="timeline-list">{data.interactions.map(item=><article className="lux-card timeline-item" key={item.id}><span className="timeline-dot"/><div><header><div><small>{translateStatus(item.interactionType)} · {formatDate(item.occurredAt)}</small><h3>{item.subject}</h3></div><StatusBadge status={item.status}/></header><p>{item.customerName}</p>{item.notes&&<blockquote>{item.notes}</blockquote>}{item.nextFollowUpAt&&<small>پیگیری: {formatDate(item.nextFollowUpAt)}</small>}{item.status==="Open"&&<button className="secondary-button" type="button" onClick={()=>void complete(item)}><Check size={15}/> تکمیل پیگیری</button>}</div></article>)}</div>:<EmptyState title="تعامل مشتری ثبت نشده" description="تماس یا پیگیری جدید را ثبت کن؛ اطلاعات ساختگی نمایش داده نمی‌شود."/>}<Modal open={open} title="ثبت تعامل مشتری" onClose={close}><form className="entity-form" onSubmit={submit}><FormField label="مشتری"><select name="customerId" required><option value="">انتخاب کن</option>{data.customers.map(item=><option value={item.id} key={item.id}>{item.displayName}</option>)}</select></FormField><FormField label="نوع"><select name="interactionType"><option value="Call">تماس</option><option value="Message">پیام</option><option value="Meeting">جلسه</option><option value="FollowUp">پیگیری</option><option value="Note">یادداشت</option></select></FormField><FormField label="موضوع" wide><input name="subject" required/></FormField><FormField label="شرح" wide><textarea name="notes"/></FormField><FormField label="زمان پیگیری بعدی"><input name="nextFollowUpAt" type="datetime-local"/></FormField><InlineError message={formState.error}/><FormActions saving={formState.saving} submitLabel="ثبت تعامل" onCancel={close}/></form></Modal></ModuleBody>;
++  return <ModuleBody><PageHeader icon={HeartHandshake} title="ارتباط با مشتری" description="تماس‌ها، جلسات، یادداشت‌ها و پیگیری‌های آینده." actionLabel="تعامل جدید" onAction={()=>{setFormState(initialFormState);setOpen(true);}} secondary={<RefreshButton refreshing={refreshing} onClick={()=>void refresh()}/>} /><DataNotice />{requestedCustomerId&&<div className="reference-active-filter">ارتباطات {data.customers.find(customer=>customer.id===requestedCustomerId)?.displayName||"مشتری"}<button type="button" onClick={()=>onNavigate("/crm")}>نمایش همه</button></div>}<div className="module-metrics-grid"><MetricTile label="تعامل‌ها" value={String(visibleInteractions.length)} hint="همه رکوردها"/><MetricTile label="پیگیری باز" value={String(visibleInteractions.filter(item=>item.status==="Open").length)} hint="نیازمند اقدام"/><MetricTile label="تکمیل‌شده" value={String(visibleInteractions.filter(item=>item.status==="Completed").length)} hint="بسته‌شده"/></div>{visibleInteractions.length?<div className="timeline-list">{visibleInteractions.map(item=><article className="lux-card timeline-item" key={item.id}><span className="timeline-dot"/><div><header><div><small>{translateStatus(item.interactionType)} · {formatDate(item.occurredAt)}</small><h3>{item.subject}</h3></div><StatusBadge status={item.status}/></header><p>{item.customerName}</p>{item.notes&&<blockquote>{item.notes}</blockquote>}{item.nextFollowUpAt&&<small>پیگیری: {formatDate(item.nextFollowUpAt)}</small>}{item.status==="Open"&&<button className="secondary-button" type="button" onClick={()=>void complete(item)}><Check size={15}/> تکمیل پیگیری</button>}</div></article>)}</div>:<EmptyState title="تعامل مشتری ثبت نشده" description="تماس یا پیگیری جدید را ثبت کن؛ اطلاعات ساختگی نمایش داده نمی‌شود."/>}<Modal open={open} title="ثبت تعامل مشتری" onClose={close}><form className="entity-form" onSubmit={submit}><FormField label="مشتری"><select name="customerId" defaultValue={requestedCustomerId} required><option value="">انتخاب کن</option>{data.customers.map(item=><option value={item.id} key={item.id}>{item.displayName}</option>)}</select></FormField><FormField label="نوع"><select name="interactionType"><option value="Call">تماس</option><option value="Message">پیام</option><option value="Meeting">جلسه</option><option value="FollowUp">پیگیری</option><option value="Note">یادداشت</option></select></FormField><FormField label="موضوع" wide><input name="subject" required/></FormField><FormField label="شرح" wide><textarea name="notes"/></FormField><FormField label="زمان پیگیری بعدی"><input name="nextFollowUpAt" type="datetime-local"/></FormField><InlineError message={formState.error}/><FormActions saving={formState.saving} submitLabel="ثبت تعامل" onCancel={close}/></form></Modal></ModuleBody>;
+ }
+ 
+ function SettingsPage({ onNotice }: RouteProps) {
+@@ -974,7 +1286,7 @@ export function OperationsRouter(props: RouteProps) {
+   if(base.startsWith("/orders/new"))return <NewOrderPage {...props}/>;
+   if(base.startsWith("/orders"))return <OrdersPage {...props}/>;
+   if(base.startsWith("/accounting"))return <AccountingPage/>;
+-  if(base.startsWith("/reports"))return <ReportsPage/>;
++  if(base.startsWith("/reports"))return <ReportsPage {...props}/>;
+   if(base.startsWith("/employees"))return <EmployeesPage {...props}/>;
+   if(base.startsWith("/suppliers"))return <SupplierPurchasesPage {...props}/>;
+   if(base.startsWith("/crm"))return <CrmPage {...props}/>;
+diff --git a/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx b/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx
+index 4f1011b..f315d0c 100644
+--- a/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx
++++ b/GoldInvoice.Client/src/features/operations/PagePrimitives.tsx
+@@ -1,5 +1,5 @@
+ import type { LucideIcon } from "lucide-react";
+-import { AlertTriangle, Inbox, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
++import { AlertTriangle, ArrowUpLeft, Inbox, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
+ import type { PropsWithChildren, ReactNode } from "react";
+ import { activeNumberLocale, formatTomansFromRials } from "../../lib/money";
+ 
+@@ -24,6 +24,8 @@ export function translateStatus(status: string): string {
+     Active: "فعال",
+     Inactive: "غیرفعال",
+     Pending: "در انتظار",
++    Overdue: "معوق",
++    Draft: "پیش‌نویس",
+     AwaitingPayment: "در انتظار پرداخت",
+     PaymentReview: "بررسی پرداخت",
+     Paid: "پرداخت‌شده",
+@@ -45,6 +47,16 @@ export function translateStatus(status: string): string {
+     Owner: "مالک",
+     Admin: "مدیر",
+     Customer: "مشتری",
++    Cash: "نقدی",
++    PointOfSale: "کارت‌خوان",
++    BankTransfer: "حواله بانکی",
++    CardToCard: "کارت‌به‌کارت",
++    FixedPrice: "قیمت ثابت",
++    WeightBased: "قیمت وزنی",
++    MarketBased: "نرخ لحظه‌ای",
++    ManualReview: "بررسی دستی",
++    Gold18K: "طلای ۱۸ عیار",
++    Gold24K: "طلای ۲۴ عیار",
+   };
+   return labels[status] ?? status;
+ }
+@@ -86,6 +98,64 @@ export function PageHeader({
+   );
+ }
+ 
++export function ReferencePageHeader({
++  eyebrow,
++  title,
++  description,
++  actionLabel,
++  onAction,
++  secondary,
++}: {
++  eyebrow: string;
++  title: string;
++  description: string;
++  actionLabel?: string;
++  onAction?: () => void;
++  secondary?: ReactNode;
++}) {
++  return (
++    <header className="reference-page-heading fade-up">
++      <div>
++        <p className="eyebrow gold-text">{eyebrow}</p>
++        <h1>{title}</h1>
++        <p>{description}</p>
++      </div>
++      {(secondary || (actionLabel && onAction)) && (
++        <div className="module-heading-actions">
++          {secondary}
++          {actionLabel && onAction && (
++            <button className="primary-button" type="button" onClick={onAction}>
++              <Plus size={17} /> {actionLabel}
++            </button>
++          )}
++        </div>
++      )}
++    </header>
++  );
++}
++
++export function FeatureNavigationCard({
++  title,
++  description,
++  onClick,
++  meta,
++}: {
++  title: string;
++  description: string;
++  onClick: () => void;
++  meta?: string;
++}) {
++  return (
++    <button className="lux-card reference-feature-card fade-up" type="button" onClick={onClick}>
++      <span className="card-gold-rule" />
++      <ArrowUpLeft className="reference-feature-arrow" size={16} strokeWidth={1.4} />
++      <h2>{title}</h2>
++      <p>{description}</p>
++      {meta && <small>{meta}</small>}
++    </button>
++  );
++}
++
+ export function RefreshButton({
+   refreshing,
+   onClick,
+diff --git a/GoldInvoice.Client/src/features/operations/operations.types.ts b/GoldInvoice.Client/src/features/operations/operations.types.ts
+index 5e6efa4..076e55d 100644
+--- a/GoldInvoice.Client/src/features/operations/operations.types.ts
++++ b/GoldInvoice.Client/src/features/operations/operations.types.ts
+@@ -63,6 +63,23 @@ export interface Product {
+   rowVersion: string;
+ }
+ 
++export interface ProductPricingRule {
++  id: string;
++  productVariantId: string;
++  pricingMethod: string;
++  goldMarketPriceType?: string | null;
++  fixedPriceRials?: number | null;
++  fixedGoldPricePerGramRials?: number | null;
++  wageType: string;
++  wageValue: number;
++  profitPercentage: number;
++  taxPercentage: number;
++  effectiveFrom: string;
++  effectiveTo?: string | null;
++  isActive: boolean;
++  rowVersion: string;
++}
++
+ export interface Warehouse {
+   id: string;
+   code: string;
+diff --git a/GoldInvoice.Client/src/i18n/LocaleContext.tsx b/GoldInvoice.Client/src/i18n/LocaleContext.tsx
+index 9292b6c..7eafb01 100644
+--- a/GoldInvoice.Client/src/i18n/LocaleContext.tsx
++++ b/GoldInvoice.Client/src/i18n/LocaleContext.tsx
+@@ -523,7 +523,7 @@ const translations: Record<string, string> = {
+   "فیلتر دسته‌بندی فعال است.": "A category filter is active.",
+   "قبل از اولین سفارش، مشخصات فروشگاه را در تنظیمات کامل کن.": "Complete the store details in Settings before the first order.",
+   "قبل از ثبت سفارش، مشخصات فروشگاه را در تنظیمات کامل کن.": "Complete the store details in Settings before creating an order.",
+-  "قطعه": "pieces",
++  "قطعه": "Piece",
+   "قیمت فروش این فرم، قیمت فعال فروشگاه برای مدل انتخاب‌شده می‌شود.": "The selling price entered here becomes the active store price for the selected variant.",
+   "مالک و مدیران سیستم از جدول امنیت و نقش‌ها خوانده می‌شوند.": "The owner and administrators are loaded from security roles.",
+   "مبالغ و اقلام قفل هستند؛ فقط اطلاعات چاپی با ثبت دلیل اصلاح می‌شوند.": "Amounts and items are locked; only printable details can be changed with an audit reason.",
+@@ -636,6 +636,162 @@ const translations: Record<string, string> = {
+   "۳ پرداخت": "3 Payment",
+   "۴ فاکتور": "4 Invoice",
+   "— موجودی": "— Stock",
++  "صدور صورتحساب": "Billing",
++  "همه فروش‌های مِزون، از سفارش‌های اختصاصی تا خریدهای بوتیک.": "Every maison sale, from bespoke orders to boutique purchases.",
++  "ایجاد فاکتور": "Create invoice",
++  "جست‌وجو بر اساس مشتری یا شماره": "Search by customer or invoice number",
++  "همه": "All",
++  "معوق": "Overdue",
++  "پیش‌نویس": "Draft",
++  "تعداد اقلام": "Item count",
++  "عملیات": "Actions",
++  "فاکتوری با این فیلتر پیدا نشد": "No invoices match this filter",
++  "فیلتر یا عبارت جست‌وجو را تغییر بده؛ اطلاعات این بخش مستقیماً از بک‌اند خوانده می‌شود.": "Change the filter or search term; this page reads directly from the backend.",
++  "افرادی که پشت هر قطعه‌اند — سابقه، جایگاه و مانده حساب‌ها.": "The people behind every piece — history, standing and account balances.",
++  "موبایل:": "Mobile:",
++  "شهر ثبت نشده": "City not recorded",
++  "پلاتینی": "Platinum",
++  "طلایی": "Gold",
++  "نقره‌ای": "Silver",
++  "خریدها": "Purchases",
++  "مجموع خرید": "Total purchases",
++  "مانده بدهی": "Outstanding balance",
++  "سپرده‌ها": "Deposits",
++  "اقساط": "Installments",
++  "مدارک": "Documents",
++  "یادداشت‌ها": "Notes",
++  "ارتباطات": "Interactions",
++  "ثبت خرید جدید": "Create new purchase",
++  "کاتالوگ": "Catalog",
++  "کاتالوگ وندوم — کلکسیون‌ها، کدهای محصول و قواعد قیمت‌گذاری.": "The Vendome catalog — collections, product codes and pricing rules.",
++  "کلکسیون‌ها": "Collections",
++  "اِکلا، لومیر، سِرَن و ریو — هرکدام با جدول قیمت و بسته تبلیغاتی اختصاصی.": "Éclat, Lumière, Serein and Rive — each with a dedicated price list and campaign pack.",
++  "قواعد قیمت‌گذاری": "Pricing rules",
++  "قیمت بر پایه وزن طلا با نرخ لحظه‌ای ۱۸ و ۲۴ عیار، اجرت و حاشیه تولید.": "Pricing based on gold weight, live 18K and 24K rates, labor and production margin.",
++  "سفارش‌های اختصاصی": "Bespoke orders",
++  "محصولات سفارشی با طرح مشتری، تأمین نگین و زمان‌بندی آتلیه.": "Custom pieces with client designs, stone sourcing and atelier scheduling.",
++  "مدیریت کلکسیون‌ها، تصاویر، کدهای محصول و مشخصات تخصصی هر قطعه.": "Manage collections, imagery, product codes and detailed specifications for every piece.",
++  "قیمت خرید و فروش هر مدل در کنار نرخ‌های واقعی بازار و حاشیه مورد انتظار.": "Purchase and selling prices for each variant alongside real market rates and expected margin.",
++  "مدل‌های قیمت‌گذاری‌شده": "Priced variants",
++  "وزن خالص": "Net weight",
++  "قیمت خرید": "Purchase price",
++  "قیمت فروش": "Selling price",
++  "حاشیه مورد انتظار": "Expected margin",
++  "منبع قیمت": "Price source",
++  "روش قیمت‌گذاری": "Pricing method",
++  "قیمت ثابت": "Fixed price",
++  "قیمت وزنی": "Weight-based price",
++  "نرخ لحظه‌ای": "Live market rate",
++  "بررسی دستی": "Manual review",
++  "بخشی از قواعد قیمت‌گذاری دریافت نشد:": "Some pricing rules could not be loaded:",
++  "مدل محصولی ثبت نشده": "No product variants found",
++  "از کلکسیون‌ها یک محصول و مدل واقعی ثبت کن تا قواعد قیمت‌گذاری نمایش داده شوند.": "Create a real product and variant in Collections to populate pricing rules.",
++  "سفارش‌های مشتریان و اقلام آن‌ها؛ همه رکوردها مستقیماً از بک‌اند خوانده می‌شوند.": "Customer orders and their items; every record is read directly from the backend.",
++  "در نسخه فعلی بک‌اند، نوع «اختصاصی» جداگانه روی سفارش ذخیره نمی‌شود؛ این نما همه سفارش‌های واقعی را نمایش می‌دهد.": "The current backend does not store a separate bespoke-order type, so this view shows every real order.",
++  "سفارش اختصاصی ثبت نشده": "No bespoke orders found",
++  "پس از ثبت سفارش مشتری، اقلام واقعی آن در این صفحه نمایش داده می‌شوند.": "Real order items appear here after a customer order is created.",
++  "گاوصندوق‌ها": "Vaults",
++  "انبار جواهرات": "Jewelry inventory",
++  "همه قطعات ثبت‌شده — عیار، نگین، ارزش‌گذاری و محل نگهداری.": "Every registered piece — karat, stones, valuation and storage location.",
++  "افزودن قطعه": "Add piece",
++  "قطعات موجود": "Pieces in stock",
++  "ارزش گاوصندوق": "Vault value",
++  "هشدار موجودی کم": "Low-stock alerts",
++  "ثبت‌شده در گاوصندوق‌ها": "Recorded across vaults",
++  "بر پایه آخرین قیمت فروش یا بهای خرید": "Based on the latest selling price or purchase cost",
++  "دو قطعه یا کمتر": "Two pieces or fewer",
++  "جست‌وجو بر اساس نام یا کد کالا": "Search by name or SKU",
++  "کد کالا": "SKU",
++  "وزن": "Weight",
++  "نگین": "Stone",
++  "ارزش": "Value",
++  "قیمت": "Price",
++  "دارد": "Yes",
++  "ندارد": "No",
++  "قطعه‌ای با این جست‌وجو پیدا نشد": "No pieces match this search",
++  "قطعه جدید را از تأمین‌کننده ثبت کن تا قیمت خرید، قیمت فروش و موجودی هم‌زمان ذخیره شوند.": "Add a piece through a supplier so purchase price, selling price and stock are saved together.",
++  "هوش تجاری": "Business intelligence",
++  "گزارش‌های شکیل و قابل خروجی‌گیری از فروش، انبار، مشتریان و امور مالی.": "Polished, export-ready reports for sales, inventory, customers and finance.",
++  "درآمد روزانه، هفتگی، ماهانه و سالانه با تفکیک کلکسیون.": "Daily, weekly, monthly and annual revenue by collection.",
++  "معاملات طلا": "Gold trading",
++  "وضعیت خرید و فروش، اختلاف قیمت محقق‌شده و یادداشت‌های پوشش ریسک.": "Purchase and sale status, realized spreads and hedging notes.",
++  "گردش موجودی، قطعات راکد و ارزش‌گذاری گاوصندوق.": "Inventory movement, dormant pieces and vault valuation.",
++  "مشتریان و اقساط": "Customers and installments",
++  "سطوح وفاداری، نرخ وصول و اقساط معوق.": "Loyalty tiers, collection rates and overdue installments.",
++  "سود و مالیات": "Profit and tax",
++  "تحلیل حاشیه سود در کنار ذخایر مالیات و عوارض.": "Margin analysis alongside tax and duty provisions.",
++  "درآمد واقعی روزانه، ماهانه و سالانه با تفکیک محصول و تعداد فروش.": "Actual daily, monthly and annual revenue by product and quantity sold.",
++  "درآمد ماهانه": "Monthly revenue",
++  "درآمد سالانه": "Annual revenue",
++  "تعداد فروش": "Units sold",
++  "سهم از فروش": "Sales share",
++  "فروشی ثبت نشده": "No sales found",
++  "پس از صدور فاکتور، درآمد واقعی این گزارش تکمیل می‌شود.": "Actual revenue appears here after invoices are issued.",
++  "خریدهای ثبت‌شده از تأمین‌کنندگان، قیمت فروش و اختلاف واقعی هر معامله.": "Supplier purchases, selling prices and the actual spread for every trade.",
++  "حجم خرید": "Purchase volume",
++  "ارزش فروش مورد انتظار": "Expected sales value",
++  "اختلاف قیمت": "Price spread",
++  "بر پایه قیمت ثبت‌شده": "Based on recorded prices",
++  "پیش از تخفیف": "Before discounts",
++  "معامله طلا ثبت نشده": "No gold trades found",
++  "خرید را از بخش تأمین‌کنندگان ثبت کن تا این گزارش از بک‌اند تکمیل شود.": "Record a supplier purchase to populate this backend report.",
++  "موجودی قابل فروش، قطعات کم‌موجود و ارزش‌گذاری واقعی گاوصندوق.": "Available stock, low-stock pieces and the actual vault valuation.",
++  "بهای موجودی": "Inventory cost",
++  "قیمت فروش فعلی": "Current selling price",
++  "نیازمند تأمین": "Requires replenishment",
++  "موجود": "Available",
++  "ارزش فروش": "Sales value",
++  "سطح خرید، مانده تسویه و نرخ وصول هر مشتری بر پایه سفارش‌ها و فاکتورها.": "Purchase level, outstanding balance and collection rate for each customer based on orders and invoices.",
++  "نرخ وصول": "Collection rate",
++  "حاشیه سود ثبت‌شده روی اقلام فاکتور در کنار مالیات و عوارض واقعی.": "Recorded invoice-item margins alongside actual taxes and duties.",
++  "درآمد": "Revenue",
++  "مالیات و عوارض": "Tax and duties",
++  "حاشیه سود": "Profit margin",
++  "پس از بهای خرید و تخفیف": "After purchase cost and discounts",
++  "ثبت‌شده روی اقلام": "Recorded on invoice items",
++  "سود به درآمد": "Profit to revenue",
++  "فاکتوری ثبت نشده": "No invoices found",
++  "پس از صدور فاکتور، سود و مالیات واقعی هر سند نمایش داده می‌شود.": "Actual profit and tax for each document appear after invoices are issued.",
++  "گزارش پیدا نشد": "Report not found",
++  "یکی از کارت‌های گزارش را انتخاب کن.": "Choose one of the report cards.",
++  "منابع انسانی": "Human resources",
++  "کارکنان بوتیک، هنرمندان آتلیه و پورسانت‌های آن‌ها.": "Boutique staff, atelier artisans and their commissions.",
++  "فهرست کارکنان": "Employee directory",
++  "مشاوران بوتیک، گوهرشناسان، حکاکان و کارکنان پشتیبانی.": "Boutique advisors, gemologists, engravers and support staff.",
++  "پورسانت‌ها": "Commissions",
++  "پورسانت مشاوران بابت فاکتورهای تسویه‌شده، پرداخت ماهانه.": "Advisor commissions on settled invoices, paid monthly.",
++  "برنامه کاری": "Work schedule",
++  "شیفت‌ها، نوبت‌کاری آتلیه و تقویم مرخصی.": "Shifts, atelier rotations and leave calendar.",
++  "پورسانت مشاوران بابت فاکتورهای تسویه‌شده و وضعیت پرداخت ماهانه.": "Advisor commissions on settled invoices and monthly payout status.",
++  "کارکنان فعال": "Active employees",
++  "فروش تسویه‌شده": "Settled sales",
++  "بدون انتساب کارمند": "No employee assignment",
++  "بک‌اند فعلی هنوز شناسه فروشنده را روی فاکتور ذخیره نمی‌کند؛ بنابراین پورسانت ساختگی محاسبه نشده و تا زمان اضافه‌شدن این ارتباط با «—» نمایش داده می‌شود.": "The current backend does not store a salesperson ID on invoices, so no fabricated commission is calculated and values remain blank until that link is added.",
++  "کارمند": "Employee",
++  "فاکتور منتسب": "Assigned invoices",
++  "فروش منتسب": "Assigned sales",
++  "پورسانت": "Commission",
++  "وضعیت حضور سیستمی، نقش و آخرین فعالیت کارکنان ثبت‌شده.": "System presence, role and latest activity for registered employees.",
++  "مدل شیفت و مرخصی هنوز در بک‌اند تعریف نشده است؛ این صفحه فقط وضعیت واقعی حساب‌ها و آخرین فعالیت را نشان می‌دهد.": "Shift and leave models are not yet defined in the backend; this page shows only real account status and latest activity.",
++  "برنامه‌ای برای نمایش وجود ندارد": "No schedule data available",
++  "ابتدا حساب کارکنان را از فهرست کارکنان ثبت کن.": "Create employee accounts from the directory first.",
++  "عملیات روزانه": "Daily operations",
++  "باز کردن صندوق، مرور فعالیت روز و بستن دفاتر.": "Open the till, review daily activity and close the books.",
++  "وجوه امانی": "Trust funds",
++  "سپرده‌های امانی مشتریان، تخصیص‌ها و آزادسازی‌ها.": "Customer trust deposits, allocations and releases.",
++  "فروش اقساطی، جدول پرداخت و وضعیت وصول.": "Installment sales, payment schedules and collection status.",
++  "تسویه فاکتور": "Invoice settlement",
++  "دریافت وجه، تسویه مانده‌ها و مرور تاریخچه پرداخت.": "Receive funds, settle balances and review payment history.",
++  "سود بانکی": "Bank interest",
++  "سود دریافتی سپرده‌ها و سود پرداختی تسهیلات.": "Interest earned on deposits and paid on facilities.",
++  "وام‌های بانکی": "Bank loans",
++  "تسهیلات، مانده بدهی، اقساط ماهانه و سود.": "Facilities, outstanding principal, monthly installments and interest.",
++  "سود امروز": "Today's profit",
++  "ارزش انبار": "Inventory value",
++  "مطالبات وصول‌نشده": "Outstanding receivables",
++  "سپرده مشتریان": "Customer deposits",
++  "مازاد پرداخت تأییدشده": "Verified payment surplus",
++  "درآمد و سود": "Revenue and profit",
+ };
+ 
+ const dynamicTranslations: Array<[RegExp, string]> = [
+@@ -654,6 +810,16 @@ const dynamicTranslations: Array<[RegExp, string]> = [
+   [/^(.+)\s+سفارش$/u, "$1 orders"],
+   [/^(.+)\s+قطعه$/u, "$1 pieces"],
+   [/^(.+)\s+پرداخت$/u, "$1 payments"],
++  [/^(.+)\s+محصول ثبت‌شده$/u, "$1 products recorded"],
++  [/^(.+)\s+نرخ زنده$/u, "$1 live rates"],
++  [/^(.+)\s+سفارش واقعی$/u, "$1 real orders"],
++  [/^(.+)\s+خرید ثبت‌شده$/u, "$1 recorded purchases"],
++  [/^(.+)\s+ردیف موجودی$/u, "$1 inventory rows"],
++  [/^(.+)\s+حساب کاربری$/u, "$1 user accounts"],
++  [/^(.+)\s+کارمند فعال$/u, "$1 active employees"],
++  [/^مشتری از\s+(.+)$/u, "Customer since $1"],
++  [/^از\s+(.+)\s+مدل$/u, "of $1 variants"],
++  [/^بخشی از قواعد قیمت‌گذاری دریافت نشد:\s*(.+)$/u, "Some pricing rules could not be loaded: $1"],
+   [/^موجودی\s+(.+)$/u, "Stock $1"],
+   [/^پیگیری:\s*(.+)$/u, "Follow-up: $1"],
+ ];
+diff --git a/GoldInvoice.Client/src/styles.css b/GoldInvoice.Client/src/styles.css
+index 539e18f..ca01521 100644
+--- a/GoldInvoice.Client/src/styles.css
++++ b/GoldInvoice.Client/src/styles.css
+@@ -137,7 +137,7 @@ textarea:focus-visible {
+ .module-main {
+   width: 100%;
+   min-height: 100vh;
+-  padding: 96px 32px 64px 264px;
++  padding: 96px 344px 64px 264px;
+ }
+ 
+ .module-heading {
+@@ -179,6 +179,410 @@ textarea:focus-visible {
+   font-size: 12px;
+ }
+ 
++.reference-page-heading {
++  display: flex;
++  align-items: flex-end;
++  justify-content: space-between;
++  margin-bottom: 31px;
++  gap: 24px;
++}
++
++.reference-page-heading h1 {
++  margin: 5px 0 4px;
++  color: var(--foreground);
++  font-size: 36px;
++  font-weight: 700;
++  line-height: 1.12;
++  letter-spacing: -0.03em;
++}
++
++.reference-page-heading > div:first-child > p:not(.eyebrow) {
++  max-width: 660px;
++  margin: 0;
++  color: var(--muted-foreground);
++  font-size: 12px;
++  font-weight: 300;
++  line-height: 1.85;
++}
++
++.reference-page-heading .primary-button {
++  height: 36px;
++  padding-inline: 16px;
++}
++
++.reference-feature-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 16px;
++}
++
++.reference-feature-grid--three {
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++}
++
++.reference-feature-card {
++  position: relative;
++  display: flex;
++  min-width: 0;
++  min-height: 184px;
++  flex-direction: column;
++  align-items: stretch;
++  padding: 24px;
++  direction: rtl;
++  color: var(--foreground);
++  text-align: right;
++  cursor: pointer;
++  overflow: hidden;
++  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
++}
++
++.reference-feature-card:hover {
++  border-color: color-mix(in oklch, var(--gold) 56%, var(--border));
++  box-shadow: 0 2px 3px rgb(18 34 58 / 0.05), 0 18px 30px -18px rgb(18 34 58 / 0.36);
++  transform: translateY(-2px);
++}
++
++.reference-feature-card .card-gold-rule {
++  top: 24px;
++  right: 24px;
++}
++
++.reference-feature-arrow {
++  position: absolute;
++  top: 38px;
++  left: 24px;
++  color: var(--muted-foreground);
++  transition: color 180ms ease, transform 180ms ease;
++}
++
++.reference-feature-card:hover .reference-feature-arrow {
++  color: var(--gold);
++  transform: translate(-2px, -2px);
++}
++
++.reference-feature-card h2 {
++  margin: 40px 0 7px;
++  font-size: 18px;
++  font-weight: 700;
++  line-height: 1.55;
++}
++
++.reference-feature-card p {
++  margin: 0;
++  color: var(--muted-foreground);
++  font-size: 11px;
++  font-weight: 300;
++  line-height: 1.95;
++}
++
++.reference-feature-card small {
++  margin-top: auto;
++  padding-top: 13px;
++  color: var(--gold);
++  font-size: 9px;
++}
++
++.reference-filter-bar {
++  display: grid;
++  grid-template-columns: minmax(210px, 1fr) auto auto;
++  align-items: center;
++  margin-bottom: 16px;
++  gap: 10px;
++}
++
++.reference-search {
++  display: flex;
++  height: 40px;
++  align-items: center;
++  padding: 0 12px;
++  gap: 8px;
++  color: var(--muted-foreground);
++  background: color-mix(in oklch, var(--card) 90%, transparent);
++  border: 1px solid var(--border);
++  border-radius: 10px;
++}
++
++.reference-search:focus-within {
++  color: var(--gold);
++  border-color: color-mix(in oklch, var(--gold) 52%, var(--border));
++}
++
++.reference-search input {
++  width: 100%;
++  padding: 0;
++  color: var(--foreground);
++  background: transparent;
++  border: 0;
++  outline: 0;
++  font-size: 10px;
++}
++
++.reference-tabs {
++  display: inline-flex;
++  height: 40px;
++  align-items: center;
++  padding: 3px;
++  background: var(--muted);
++  border: 1px solid var(--border);
++  border-radius: 10px;
++}
++
++.reference-tabs button,
++.reference-refresh,
++.reference-active-filter button {
++  min-height: 32px;
++  padding: 0 10px;
++  color: var(--muted-foreground);
++  background: transparent;
++  border: 0;
++  border-radius: 7px;
++  font-size: 9px;
++  white-space: nowrap;
++  cursor: pointer;
++}
++
++.reference-tabs button.is-active {
++  color: var(--foreground);
++  background: var(--card);
++  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
++}
++
++.reference-refresh {
++  border: 1px solid var(--border);
++}
++
++.reference-refresh:disabled {
++  opacity: 0.55;
++  cursor: wait;
++}
++
++.reference-active-filter {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  margin: -4px 0 13px;
++  padding: 8px 11px;
++  color: var(--muted-foreground);
++  background: color-mix(in oklch, var(--gold) 7%, var(--card));
++  border: 1px solid color-mix(in oklch, var(--gold) 24%, var(--border));
++  border-radius: 9px;
++  font-size: 9px;
++}
++
++.reference-active-filter button {
++  min-height: auto;
++  padding: 2px 5px;
++  color: var(--gold);
++}
++
++.reference-invoices-table {
++  min-width: 1040px;
++}
++
++.reference-inventory-table {
++  min-width: 1480px;
++}
++
++.reference-filter-bar--inventory {
++  grid-template-columns: minmax(240px, 1fr) auto;
++}
++
++.reference-inline-actions {
++  display: flex;
++  align-items: center;
++  gap: 7px;
++}
++
++.reference-customer-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 16px;
++}
++
++.reference-customer-card {
++  min-width: 0;
++  min-height: 252px;
++  padding: 24px;
++  overflow: hidden;
++}
++
++.reference-customer-card > header {
++  display: grid;
++  grid-template-columns: 48px minmax(0, 1fr) auto;
++  align-items: center;
++  gap: 12px;
++}
++
++.reference-customer-avatar {
++  display: grid;
++  width: 48px;
++  height: 48px;
++  place-items: center;
++  color: var(--gold-soft);
++  background: var(--navy);
++  border: 1px solid color-mix(in oklch, var(--gold) 36%, var(--navy));
++  border-radius: 50%;
++  font-size: 13px;
++  font-weight: 600;
++}
++
++.reference-customer-identity {
++  min-width: 0;
++}
++
++.reference-customer-identity h2 {
++  margin: 0;
++  font-size: 18px;
++  font-weight: 700;
++  line-height: 28px;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  overflow: hidden;
++}
++
++.reference-customer-identity p,
++.reference-customer-phone {
++  display: block;
++  margin: 0;
++  color: var(--muted-foreground);
++  font-size: 9px;
++  line-height: 1.75;
++}
++
++.reference-customer-phone b {
++  color: color-mix(in oklch, var(--foreground) 80%, var(--muted-foreground));
++  font-weight: 500;
++}
++
++.loyalty-badge {
++  align-self: start;
++  padding: 4px 8px;
++  border: 1px solid;
++  border-radius: 999px;
++  font-size: 8px;
++  white-space: nowrap;
++}
++
++.loyalty-badge--platinum {
++  color: #697486;
++  background: color-mix(in oklch, #aab4c1 12%, var(--card));
++  border-color: color-mix(in oklch, #8793a4 35%, var(--border));
++}
++
++.loyalty-badge--gold {
++  color: color-mix(in oklch, var(--gold) 88%, var(--foreground));
++  background: color-mix(in oklch, var(--gold) 9%, var(--card));
++  border-color: color-mix(in oklch, var(--gold) 38%, var(--border));
++}
++
++.loyalty-badge--silver {
++  color: var(--muted-foreground);
++  background: var(--muted);
++  border-color: var(--border);
++}
++
++.reference-customer-stats {
++  display: grid;
++  grid-template-columns: repeat(4, minmax(0, 1fr));
++  margin: 21px 0 17px;
++  gap: 16px;
++}
++
++.reference-customer-stats > div,
++.customer-stat {
++  min-width: 0;
++  padding: 0;
++  text-align: inherit;
++  background: transparent;
++  border: 0;
++}
++
++.customer-stat {
++  cursor: pointer;
++}
++
++.reference-customer-stats dt {
++  margin-bottom: 5px;
++  color: var(--muted-foreground);
++  font-size: 8px;
++  white-space: nowrap;
++}
++
++.reference-customer-stats dd {
++  min-width: 0;
++  margin: 0;
++  font-family: "Vazirmatn", sans-serif;
++  font-size: 10px;
++  font-variant-numeric: tabular-nums;
++  font-weight: 700;
++  letter-spacing: -0.03em;
++  white-space: nowrap;
++}
++
++.customer-stat:hover dd {
++  color: var(--gold);
++}
++
++.reference-customer-links {
++  display: flex;
++  min-height: 37px;
++  align-items: center;
++  flex-wrap: wrap;
++  padding-top: 12px;
++  gap: 6px;
++  border-top: 1px solid var(--border);
++}
++
++.reference-customer-links button {
++  display: inline-flex;
++  min-height: 25px;
++  align-items: center;
++  padding: 0 8px;
++  gap: 4px;
++  color: var(--muted-foreground);
++  background: var(--muted);
++  border: 1px solid transparent;
++  border-radius: 999px;
++  font-size: 8px;
++  cursor: pointer;
++}
++
++.reference-customer-links button:hover {
++  color: var(--gold);
++  border-color: color-mix(in oklch, var(--gold) 34%, var(--border));
++}
++
++.reference-customer-links span {
++  font-size: 7px;
++}
++
++.reference-employee-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 15px;
++}
++
++.reference-roster-card {
++  display: grid;
++  grid-template-columns: auto 1fr auto;
++  align-items: center;
++  padding: 19px;
++  gap: 13px;
++}
++
++.reference-roster-card h2 {
++  margin: 0 0 3px;
++  font-size: 15px;
++}
++
++.reference-roster-card p,
++.reference-roster-card small {
++  display: block;
++  margin: 0;
++  color: var(--muted-foreground);
++  font-size: 9px;
++}
++
+ .module-heading-actions,
+ .form-actions {
+   display: flex;
+@@ -829,6 +1233,23 @@ html[data-locale="en"] .quick-card {
+   text-align: left;
+ }
+ 
++html[data-locale="en"] .reference-feature-card,
++html[data-locale="en"] .reference-customer-card,
++html[data-locale="en"] .reference-page-heading {
++  direction: ltr;
++  text-align: left;
++}
++
++html[data-locale="en"] .reference-feature-card .card-gold-rule {
++  right: auto;
++  left: 24px;
++}
++
++html[data-locale="en"] .reference-feature-arrow {
++  right: 24px;
++  left: auto;
++}
++
+ html[data-locale="en"] .auth-brand-content {
+   text-align: left;
+ }
+@@ -1181,6 +1602,10 @@ html[data-locale="en"] .auth-language-button {
+ }
+ 
+ @media (max-width: 1279px) {
++  .module-main {
++    padding-right: 32px;
++  }
++
+   .module-metrics-grid {
+     grid-template-columns: repeat(2, minmax(0, 1fr));
+   }
+@@ -1209,6 +1634,9 @@ html[data-locale="en"] .auth-language-button {
+ 
+   .module-metrics-grid,
+   .card-grid,
++  .reference-feature-grid,
++  .reference-customer-grid,
++  .reference-employee-grid,
+   .reports-grid,
+   .settings-grid,
+   .entity-form,
+@@ -1216,6 +1644,49 @@ html[data-locale="en"] .auth-language-button {
+     grid-template-columns: 1fr;
+   }
+ 
++  .reference-page-heading {
++    align-items: stretch;
++    flex-direction: column;
++    margin-bottom: 25px;
++  }
++
++  .reference-page-heading h1 {
++    font-size: 31px;
++  }
++
++  .reference-filter-bar,
++  .reference-filter-bar--inventory {
++    grid-template-columns: 1fr;
++  }
++
++  .reference-tabs {
++    width: 100%;
++    overflow-x: auto;
++  }
++
++  .reference-inline-actions {
++    align-items: stretch;
++    flex-wrap: wrap;
++  }
++
++  .reference-customer-card {
++    padding: 20px;
++  }
++
++  .reference-customer-card > header {
++    grid-template-columns: 44px minmax(0, 1fr) auto;
++  }
++
++  .reference-customer-avatar {
++    width: 44px;
++    height: 44px;
++  }
++
++  .reference-customer-stats {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++    gap: 13px 18px;
++  }
++
+   .form-field--wide,
+   .inline-error,
+   .inline-help,

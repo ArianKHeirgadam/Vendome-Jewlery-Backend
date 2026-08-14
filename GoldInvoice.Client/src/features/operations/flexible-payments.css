@@ -1,0 +1,190 @@
+.installment-setup,
+.trust-allocation-form {
+  display: grid;
+  gap: 16px;
+}
+
+.installment-summary,
+.trust-allocation-summary {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: color-mix(in oklch, var(--gold) 5%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.installment-summary > svg,
+.trust-allocation-summary > svg {
+  color: var(--gold);
+}
+
+.installment-summary span,
+.trust-allocation-summary span,
+.trust-balance-card span {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.installment-summary strong,
+.trust-allocation-summary strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.installment-summary label {
+  display: grid;
+  gap: 4px;
+}
+
+.installment-summary input {
+  width: 86px;
+}
+
+.trust-allocation-summary {
+  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+}
+
+.installment-editor-table {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.installment-editor-head,
+.installment-editor-row {
+  display: grid;
+  grid-template-columns: 70px minmax(150px, 1fr) minmax(170px, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.installment-editor-head {
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--navy) 5%, var(--card));
+  font-size: 9px;
+}
+
+.installment-editor-row + .installment-editor-row {
+  border-top: 1px solid var(--border);
+}
+
+.installment-editor-row > strong {
+  color: var(--gold);
+  text-align: center;
+}
+
+.installment-editor-row label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.installment-editor-row label svg {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.installment-editor-row input {
+  width: 100%;
+}
+
+.installment-total-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 13px;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--background) 60%, var(--card));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.installment-total-check strong {
+  color: var(--foreground);
+}
+
+.installment-total-check.is-valid {
+  border-color: color-mix(in oklch, var(--gold) 55%, var(--border));
+}
+
+.finance-ledger-page {
+  min-width: 0;
+}
+
+.installment-schedule {
+  display: grid;
+  gap: 14px;
+}
+
+.finance-paid-date {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.finance-invoice-link {
+  justify-self: center;
+}
+
+.trust-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 18px;
+  gap: 12px;
+}
+
+.trust-balance-card {
+  padding: 16px;
+}
+
+.trust-balance-card strong {
+  display: block;
+  margin: 6px 0 3px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.trust-balance-card small {
+  color: var(--gold);
+  font-size: 9px;
+}
+
+.finance-neutral-badge {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  padding: 0 9px;
+  color: color-mix(in oklch, var(--gold) 82%, var(--foreground));
+  background: color-mix(in oklch, var(--gold) 8%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--gold) 30%, var(--border));
+  border-radius: 999px;
+  font-size: 9px;
+}
+
+.finance-neutral-amount {
+  color: var(--foreground);
+}
+
+@media (max-width: 900px) {
+  .trust-allocation-summary {
+    grid-template-columns: auto 1fr;
+  }
+
+  .trust-balance-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .installment-editor-head,
+  .installment-editor-row {
+    grid-template-columns: 46px minmax(126px, 1fr) minmax(132px, 1fr);
+  }
+}

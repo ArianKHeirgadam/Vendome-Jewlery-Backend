@@ -117,11 +117,14 @@ public static class DependencyInjection
         services.AddScoped<ISupplierService, SupplierService>();
         services.AddScoped<ICustomerInteractionService, CustomerInteractionService>();
         services.AddScoped<IStoreProfileService, StoreProfileService>();
+        services.AddScoped<IFinancialWorkspaceService, FinancialWorkspaceService>();
         services.AddScoped<IOrderService, OrderService>();
         services.AddScoped<InvoiceService>();
         services.AddScoped<IInvoiceService>(provider => provider.GetRequiredService<InvoiceService>());
         services.AddScoped<IInvoiceIssuanceService>(provider => provider.GetRequiredService<InvoiceService>());
         services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IFlexiblePaymentService, FlexiblePaymentService>();
+        services.AddScoped<IBankInterestService, BankInterestService>();
         services.AddScoped<IOutboxWriter, OutboxWriter>();
         services.AddScoped<IOutboxStore, OutboxStore>();
         services.AddSingleton<IOutboxDispatcher, OutboxDispatcher>();

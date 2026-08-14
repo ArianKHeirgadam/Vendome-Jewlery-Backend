@@ -22,6 +22,14 @@ const STORAGE_KEY = "vendome-language";
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 const translations: Record<string, string> = {
+  "اضافه کردن کارمند جدید": "Add new employee",
+  "ثبت کارمند": "Save employee",
+  "نقش": "Role",
+  "شماره موبایل": "Mobile number",
+  "ایمیل تماس": "Contact email",
+  "ایمیل مالک / موبایل کارکنان": "Owner email / staff mobile",
+  "مالک با ایمیل وارد می‌شود؛ مدیر و کارمند با شماره موبایل.": "Owner signs in with email; managers and employees sign in with mobile.",
+  "ورود با موبایل · بدون Authenticator": "Mobile sign-in · no Authenticator",
   "مدیریت وندوم": "Vendome Management",
   "مِزون وندوم": "Vendome Maison",
   "بخش‌ها": "Sections",

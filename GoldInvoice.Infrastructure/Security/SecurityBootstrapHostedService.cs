@@ -35,11 +35,16 @@ internal sealed class SecurityBootstrapHostedService(
         await SeedRolesAsync(roleManager);
         await SeedPermissionsAsync(dbContext, cancellationToken);
         await GrantOwnerPermissionsAsync(dbContext, roleManager, cancellationToken);
+        await GrantStaffPermissionsAsync(dbContext, roleManager, cancellationToken);
 
         if (bootstrapOptions.Value.Enabled)
         {
             await BootstrapOwnerAsync(userManager, cancellationToken);
         }
+
+        await NormalizeNonOwnerStaffSecurityAsync(
+            userManager,
+            cancellationToken);
 
         if (transaction is not null)
         {
@@ -94,6 +99,7 @@ internal sealed class SecurityBootstrapHostedService(
             {
                 SecurityRoles.Owner => "System owner with all permissions.",
                 SecurityRoles.Admin => "Administrator with explicitly granted permissions.",
+                SecurityRoles.Employee => "Staff member with sales and operational permissions.",
                 _ => "Customer limited to owned resources."
             };
             var result = await roleManager.CreateAsync(new ApplicationRole(roleName, description, isSystem: true));
@@ -146,6 +152,167 @@ internal sealed class SecurityBootstrapHostedService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    private static async Task GrantStaffPermissionsAsync(
+        GoldInvoiceDbContext dbContext,
+        RoleManager<ApplicationRole> roleManager,
+        CancellationToken cancellationToken)
+    {
+        string[] adminPermissions =
+        [
+            SecurityPermissions.UsersRead,
+            SecurityPermissions.UsersManage,
+            SecurityPermissions.ProductsRead,
+            SecurityPermissions.ProductsManage,
+            SecurityPermissions.InventoryRead,
+            SecurityPermissions.InventoryAdjust,
+            SecurityPermissions.OrdersRead,
+            SecurityPermissions.OrdersManage,
+            SecurityPermissions.PaymentsRead,
+            SecurityPermissions.PaymentsManage,
+            SecurityPermissions.InvoicesRead,
+            SecurityPermissions.InvoicesPrint,
+            SecurityPermissions.InvoicesReprint,
+            SecurityPermissions.ReportsRead,
+            SecurityPermissions.SuppliersRead,
+            SecurityPermissions.SuppliersManage,
+            SecurityPermissions.CrmRead,
+            SecurityPermissions.CrmManage,
+            SecurityPermissions.SettingsRead
+        ];
+
+        string[] employeePermissions =
+        [
+            SecurityPermissions.UsersRead,
+            SecurityPermissions.UsersManage,
+            SecurityPermissions.ProductsRead,
+            SecurityPermissions.InventoryRead,
+            SecurityPermissions.OrdersRead,
+            SecurityPermissions.OrdersManage,
+            SecurityPermissions.PaymentsRead,
+            SecurityPermissions.PaymentsManage,
+            SecurityPermissions.InvoicesRead,
+            SecurityPermissions.InvoicesPrint,
+            SecurityPermissions.ReportsRead,
+            SecurityPermissions.SuppliersRead,
+            SecurityPermissions.CrmRead,
+            SecurityPermissions.SettingsRead
+        ];
+
+        await GrantRolePermissionsAsync(
+            dbContext,
+            roleManager,
+            SecurityRoles.Admin,
+            adminPermissions,
+            cancellationToken);
+
+        await GrantRolePermissionsAsync(
+            dbContext,
+            roleManager,
+            SecurityRoles.Employee,
+            employeePermissions,
+            cancellationToken);
+    }
+
+    private static async Task GrantRolePermissionsAsync(
+        GoldInvoiceDbContext dbContext,
+        RoleManager<ApplicationRole> roleManager,
+        string roleName,
+        IReadOnlyCollection<string> permissionNames,
+        CancellationToken cancellationToken)
+    {
+        var role = await roleManager.FindByNameAsync(roleName) ??
+            throw new InvalidOperationException(
+                $"The {roleName} role was not initialized.");
+
+        var permissionIds = await dbContext.Permissions
+            .Where(permission =>
+                permission.IsActive &&
+                permissionNames.Contains(permission.Name))
+            .Select(permission => permission.Id)
+            .ToListAsync(cancellationToken);
+
+        var existingIds = await dbContext.RolePermissions
+            .Where(item => item.RoleId == role.Id)
+            .Select(item => item.PermissionId)
+            .ToListAsync(cancellationToken);
+
+        var existing = existingIds.ToHashSet();
+
+        foreach (var permissionId in permissionIds.Where(id =>
+                     !existing.Contains(id)))
+        {
+            dbContext.RolePermissions.Add(
+                new RolePermission(role.Id, permissionId));
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task NormalizeNonOwnerStaffSecurityAsync(
+        UserManager<ApplicationUser> userManager,
+        CancellationToken cancellationToken)
+    {
+        var admins =
+            await userManager.GetUsersInRoleAsync(SecurityRoles.Admin);
+        var employees =
+            await userManager.GetUsersInRoleAsync(SecurityRoles.Employee);
+
+        var staff = admins
+            .Concat(employees)
+            .GroupBy(user => user.Id)
+            .Select(group => group.First())
+            .ToArray();
+
+        foreach (var user in staff)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var changed = false;
+
+            if (user.MfaRequired)
+            {
+                user.ClearMfaRequirement();
+                changed = true;
+            }
+
+            if (user.TwoFactorEnabled)
+            {
+                ThrowIfFailed(
+                    await userManager.SetTwoFactorEnabledAsync(
+                        user,
+                        false),
+                    "Two-factor authentication could not be disabled for staff.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.PhoneNumber))
+            {
+                var normalizedPhone =
+                    ContactIdentifierNormalizer.NormalizePhoneNumber(
+                        user.PhoneNumber);
+
+                if (!string.Equals(
+                        normalizedPhone,
+                        user.PhoneNumber,
+                        StringComparison.Ordinal))
+                {
+                    user.PhoneNumber = normalizedPhone;
+                    changed = true;
+                }
+
+                if (!user.PhoneNumberConfirmed)
+                {
+                    user.PhoneNumberConfirmed = true;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                ThrowIfFailed(
+                    await userManager.UpdateAsync(user),
+                    "A staff account could not be normalized.");
+            }
+        }
+    }
     private async Task BootstrapOwnerAsync(
         UserManager<ApplicationUser> userManager,
         CancellationToken cancellationToken)

@@ -69,6 +69,173 @@ internal sealed class InventoryReservationCoordinator(
         }
     }
 
+    public async Task EnsureInstallmentReservationAsync(
+        Guid orderId,
+        DateTimeOffset expiresAt,
+        CancellationToken cancellationToken)
+    {
+        if (orderId == Guid.Empty ||
+            expiresAt == default)
+        {
+            throw new ArgumentException(
+                "A valid installment order and reservation deadline are required.");
+        }
+
+        var now = timeProvider.GetUtcNow();
+        if (expiresAt <= now)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(expiresAt));
+        }
+
+        var orderItems = await dbContext.OrderItems
+            .AsNoTracking()
+            .Where(item =>
+                item.OrderId == orderId &&
+                item.PriceCalculationSnapshotId != null)
+            .OrderBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+
+        var reservations = await dbContext.StockReservations
+            .Where(reservation =>
+                reservation.OrderId == orderId &&
+                reservation.OrderItemId != null)
+            .OrderBy(reservation =>
+                reservation.OrderItemId)
+            .ToListAsync(cancellationToken);
+
+        if (orderItems.Count == 0 ||
+            reservations.Count != orderItems.Count ||
+            reservations
+                .Select(item => item.OrderItemId!.Value)
+                .Distinct()
+                .Count() != reservations.Count)
+        {
+            throw new ApplicationConflictException();
+        }
+
+        var itemsByOrderItemId =
+            orderItems.ToDictionary(item => item.Id);
+
+        var inventoryItemIds = reservations
+            .Select(item => item.InventoryItemId)
+            .Distinct()
+            .ToArray();
+
+        var inventoryItems = await dbContext.InventoryItems
+            .Where(item =>
+                inventoryItemIds.Contains(item.Id))
+            .ToDictionaryAsync(
+                item => item.Id,
+                cancellationToken);
+
+        var unitIds = reservations
+            .Where(item =>
+                item.InventoryUnitId != null)
+            .Select(item =>
+                item.InventoryUnitId!.Value)
+            .Distinct()
+            .ToArray();
+
+        var units = await dbContext.InventoryUnits
+            .Where(item =>
+                unitIds.Contains(item.Id))
+            .ToDictionaryAsync(
+                item => item.Id,
+                cancellationToken);
+
+        foreach (var reservation in reservations)
+        {
+            if (!itemsByOrderItemId.TryGetValue(
+                    reservation.OrderItemId!.Value,
+                    out var orderItem) ||
+                orderItem.InventoryItemId !=
+                    reservation.InventoryItemId ||
+                orderItem.InventoryUnitId !=
+                    reservation.InventoryUnitId ||
+                orderItem.Quantity !=
+                    reservation.Quantity ||
+                !inventoryItems.TryGetValue(
+                    reservation.InventoryItemId,
+                    out var inventoryItem))
+            {
+                throw new ApplicationConflictException();
+            }
+
+            InventoryUnit? unit = null;
+
+            if (reservation.InventoryUnitId is not null)
+            {
+                if (!units.TryGetValue(
+                        reservation.InventoryUnitId.Value,
+                        out unit) ||
+                    unit.InventoryItemId !=
+                        inventoryItem.Id)
+                {
+                    throw new ApplicationConflictException();
+                }
+            }
+
+            if (reservation.Status ==
+                StockReservationStatus.Active)
+            {
+                if (reservation.ExpiresAt < expiresAt)
+                {
+                    reservation.Extend(expiresAt);
+                }
+
+                continue;
+            }
+
+            if (reservation.Status !=
+                StockReservationStatus.Expired)
+            {
+                throw new ApplicationConflictException();
+            }
+
+            if (reservation.Quantity >
+                inventoryItem.QuantityAvailable)
+            {
+                throw new ApplicationConflictException();
+            }
+
+            if (unit is not null &&
+                unit.Status != InventoryUnitStatus.Available)
+            {
+                throw new ApplicationConflictException();
+            }
+
+            inventoryItem.Reserve(
+                reservation.Quantity);
+            unit?.Reserve();
+            reservation.Reactivate(expiresAt);
+
+            var movement = CreateMovement(
+                inventoryItem,
+                StockMovementType.Reservation,
+                quantityDelta: 0,
+                reservedQuantityDelta:
+                    reservation.Quantity,
+                unit?.Id,
+                "OrderItem",
+                orderItem.Id,
+                "Installment reservation restored");
+
+            dbContext.StockMovements.Add(movement);
+
+            outboxWriter.AddInventoryChanged(
+                inventoryItem,
+                movement);
+        }
+
+        await PersistenceUtilities.SaveChangesAsync(
+            dbContext,
+            cancellationToken);
+
+        await EnsurePayableAsync(
+            orderId,
+            cancellationToken);
+    }
     public async Task ConfirmForPaymentAsync(
         Guid orderId,
         Guid paymentId,

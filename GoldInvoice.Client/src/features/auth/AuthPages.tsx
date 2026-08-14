@@ -204,7 +204,7 @@ export function LoginPage() {
               </h2>
               <p>
                 {stage === "credentials" &&
-                  "برای ادامه، اطلاعات حساب مدیریتی را وارد کن."}
+                  "مالک با ایمیل وارد می‌شود؛ مدیر و کارمند با شماره موبایل."}
                 {stage === "mfa" &&
                   "کد برنامهٔ Authenticator یا کد بازیابی را وارد کن."}
                 {stage === "mfa-enrollment" &&
@@ -216,7 +216,7 @@ export function LoginPage() {
           {stage !== "mfa-enrollment" ? (
             <form className="auth-form" onSubmit={submitLogin}>
               <label>
-                <span>ایمیل یا شماره تلفن</span>
+                <span>ایمیل مالک / موبایل کارکنان</span>
                 <input
                   type="text"
                   autoComplete="username"

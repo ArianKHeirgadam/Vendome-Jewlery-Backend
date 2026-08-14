@@ -47,6 +47,8 @@ public sealed class ApplicationUser : IdentityUser<Guid>, IAuditableEntity
 
     public void RequireMfa() => MfaRequired = true;
 
+    public void ClearMfaRequirement() => MfaRequired = false;
+
     public void Deactivate(DateTimeOffset deactivatedAt)
     {
         if (deactivatedAt == default)

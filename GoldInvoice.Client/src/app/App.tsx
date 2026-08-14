@@ -39,7 +39,8 @@ function getCurrentPath() {
 
 function roleLabel(roles: string[]): string {
   if (roles.includes("Owner")) return "مالک مجموعه";
-  if (roles.includes("Admin")) return "مدیر مجموعه";
+  if (roles.includes("Admin")) return "مدیر مجموعه";
+  if (roles.includes("Employee")) return "کارمند";
   return "مشتری";
 }
 
@@ -105,7 +106,7 @@ function AuthenticatedApplication({ language }: { language: AppLanguage }) {
   }, [auth.user]);
   const dashboard = useMemo(
     () => buildDashboardSnapshot(operations.data, profile),
-    [operations.data, profile],
+    [operations.data, profile, language],
   );
 
   useEffect(() => {

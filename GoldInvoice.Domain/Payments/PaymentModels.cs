@@ -19,7 +19,9 @@ public enum PaymentMethod
     Cash,
     PointOfSale,
     BankTransfer,
-    CardToCard
+    CardToCard,
+    Installment,
+    TrustFund
 }
 
 public enum PaymentAttemptStatus

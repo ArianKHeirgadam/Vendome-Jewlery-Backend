@@ -1,0 +1,109 @@
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index be87aa9..7ca3506 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -170,2 +170,22 @@ interface InvoiceDesktopResult {
+ }
++
++function withCurrentStoreProfile(invoice: Invoice, storeProfile: StoreProfile | null): Invoice {
++  if (!storeProfile) return invoice;
++
++  return {
++    ...invoice,
++    store: {
++      id: invoice.store?.id ?? "current-store-profile",
++      tradeName: storeProfile.tradeName,
++      legalName: storeProfile.legalName,
++      nationalId: storeProfile.nationalId,
++      economicCode: storeProfile.economicCode,
++      registrationNumber: storeProfile.registrationNumber,
++      phoneNumber: storeProfile.phoneNumber,
++      postalCode: storeProfile.postalCode,
++      addressLine: storeProfile.addressLine,
++    },
++  };
++}
++
+ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+@@ -223,2 +243,4 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+   ) => {
++    const documentInvoice = withCurrentStoreProfile(invoice, data.storeProfile);
++
+     if (!isDesktopHost()) {
+@@ -228,3 +250,3 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+         preview.document.open();
+-        preview.document.write(buildInvoiceDocumentHtml(invoice));
++        preview.document.write(buildInvoiceDocumentHtml(documentInvoice));
+         preview.document.close();
+@@ -238,3 +260,3 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+       action,
+-      html: buildInvoiceDocumentHtml(invoice),
++      html: buildInvoiceDocumentHtml(documentInvoice),
+       suggestedFileName: invoiceFileName(invoice),
+@@ -465,2 +487,5 @@ function InvoiceDetails({
+ }) {
++  const { data } = useOperations();
++  const documentInvoice = withCurrentStoreProfile(invoice, data.storeProfile);
++
+   return (
+@@ -472,3 +497,3 @@ function InvoiceDetails({
+       </div>
+-      <iframe className="invoice-preview-frame" title={`پیش‌نمایش فاکتور ${invoice.invoiceNumber}`} srcDoc={buildInvoiceDocumentHtml(invoice)} sandbox="" />
++      <iframe className="invoice-preview-frame" title={`پیش‌نمایش فاکتور ${invoice.invoiceNumber}`} srcDoc={buildInvoiceDocumentHtml(documentInvoice)} sandbox="" />
+     </div>
+diff --git a/GoldInvoice.Client/src/styles.css b/GoldInvoice.Client/src/styles.css
+index 46c94e8..f2ce7a3 100644
+--- a/GoldInvoice.Client/src/styles.css
++++ b/GoldInvoice.Client/src/styles.css
+@@ -914,3 +914,14 @@
+ .modal-card:has(.purchase-wizard) {
++  display: flex;
+   width: min(940px, 100%);
++  min-height: 0;
++  flex-direction: column;
++}
++
++.modal-card:has(.purchase-wizard) > .modal-body {
++  min-height: 0;
++  flex: 1 1 auto;
++  overflow-y: auto;
++  overscroll-behavior: contain;
++  scrollbar-gutter: stable;
+ }
+@@ -919,2 +930,4 @@
+   display: grid;
++  min-width: 0;
++  min-height: 0;
+   gap: 18px;
+@@ -1000,3 +1013,4 @@
+ .wizard-panel {
+-  min-height: 330px;
++  min-height: min(330px, 42vh);
++  max-height: min(520px, 52vh);
+   padding: 20px;
+@@ -1005,2 +1019,4 @@
+   border-radius: 12px;
++  overflow-y: auto;
++  overscroll-behavior: contain;
+ }
+@@ -2218,2 +2234,14 @@
+ 
++:root[data-theme="dark"] .primary-button {
++  color: var(--navy-ink);
++  background: var(--navy-soft);
++  border: 1px solid color-mix(in oklch, var(--gold) 24%, var(--border));
++}
++
++:root[data-theme="dark"] .primary-button:hover:not(:disabled) {
++  color: var(--navy-ink);
++  background: color-mix(in oklch, var(--navy-soft) 82%, var(--gold));
++  border-color: color-mix(in oklch, var(--gold) 48%, var(--border));
++}
++
+ .dashboard-section {
+@@ -4004,3 +4032,4 @@
+   .wizard-panel {
+-    min-height: 300px;
++    min-height: min(300px, 40vh);
++    max-height: 50vh;
+     padding: 15px;

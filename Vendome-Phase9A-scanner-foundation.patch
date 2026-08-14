@@ -1,0 +1,432 @@
+diff --git a/GoldInvoice.Client/src/features/operations/operations.types.ts b/GoldInvoice.Client/src/features/operations/operations.types.ts
+--- a/GoldInvoice.Client/src/features/operations/operations.types.ts
++++ b/GoldInvoice.Client/src/features/operations/operations.types.ts
+@@ -77,6 +77,23 @@ export interface InventoryItem {
+   hasAcquisitionCost: boolean;
+   rowVersion: string;
+ }
++
++export interface InventoryUnit {
++  id: string;
++  productId: string;
++  productVariantId: string;
++  warehouseId: string;
++  inventoryItemId: string;
++  serialNumber?: string | null;
++  barcode?: string | null;
++  actualGrossWeight?: number | null;
++  actualNetGoldWeight?: number | null;
++  karat?: number | null;
++  status: string;
++  receivedAt: string;
++  soldAt?: string | null;
++  rowVersion: string;
++}
+ 
+ export interface OrderAddress {
+   id: string;
+diff --git a/GoldInvoice.Client/src/platform/useHidScanner.ts b/GoldInvoice.Client/src/platform/useHidScanner.ts
+new file mode 100644
+--- /dev/null
++++ b/GoldInvoice.Client/src/platform/useHidScanner.ts
+@@ -0,0 +1,115 @@
++import { useEffect, useRef } from "react";
++
++export interface HidScannerOptions {
++  enabled?: boolean;
++  minLength?: number;
++  maxLength?: number;
++  maxInterKeyDelayMs?: number;
++  resetAfterMs?: number;
++  onScan(code: string): void;
++}
++
++function isEditableTarget(target: EventTarget | null): boolean {
++  if (!(target instanceof HTMLElement)) return false;
++  if (target.isContentEditable) return true;
++
++  const tagName = target.tagName.toLowerCase();
++  return tagName === "input" || tagName === "textarea" || tagName === "select";
++}
++
++/**
++ * Captures USB barcode/QR scanners configured as HID Keyboard Wedge devices.
++ *
++ * The scanner should send the decoded identifier followed by Enter or Tab.
++ * Normal typing inside input/textarea/select/contenteditable elements is never
++ * intercepted. This keeps the scanner independent from a vendor SDK and works
++ * in both the browser client and the WPF/WebView2 desktop host.
++ */
++export function useHidScanner({
++  enabled = true,
++  minLength = 3,
++  maxLength = 128,
++  maxInterKeyDelayMs = 80,
++  resetAfterMs = 250,
++  onScan,
++}: HidScannerOptions): void {
++  const callbackRef = useRef(onScan);
++
++  useEffect(() => {
++    callbackRef.current = onScan;
++  }, [onScan]);
++
++  useEffect(() => {
++    if (!enabled) return undefined;
++
++    let buffer = "";
++    let lastKeyAt = 0;
++    let resetTimer: number | undefined;
++
++    const reset = () => {
++      buffer = "";
++      lastKeyAt = 0;
++      if (resetTimer !== undefined) {
++        window.clearTimeout(resetTimer);
++        resetTimer = undefined;
++      }
++    };
++
++    const scheduleReset = () => {
++      if (resetTimer !== undefined) window.clearTimeout(resetTimer);
++      resetTimer = window.setTimeout(reset, resetAfterMs);
++    };
++
++    const handleKeyDown = (event: KeyboardEvent) => {
++      if (
++        event.defaultPrevented ||
++        event.repeat ||
++        event.ctrlKey ||
++        event.altKey ||
++        event.metaKey ||
++        isEditableTarget(event.target)
++      ) {
++        return;
++      }
++
++      const now = performance.now();
++
++      if (event.key === "Enter" || event.key === "Tab") {
++        const code = buffer.trim();
++        reset();
++
++        if (code.length < minLength) return;
++
++        event.preventDefault();
++        callbackRef.current(code);
++        return;
++      }
++
++      if (event.key.length !== 1) return;
++
++      if (lastKeyAt > 0 && now - lastKeyAt > maxInterKeyDelayMs) {
++        buffer = "";
++      }
++
++      buffer += event.key;
++      if (buffer.length > maxLength) {
++        buffer = buffer.slice(-maxLength);
++      }
++
++      lastKeyAt = now;
++      scheduleReset();
++    };
++
++    window.addEventListener("keydown", handleKeyDown, true);
++    return () => {
++      window.removeEventListener("keydown", handleKeyDown, true);
++      reset();
++    };
++  }, [
++    enabled,
++    maxInterKeyDelayMs,
++    maxLength,
++    minLength,
++    resetAfterMs,
++  ]);
++}
+diff --git a/GoldInvoice.Client/src/features/operations/InventoryScanner.tsx b/GoldInvoice.Client/src/features/operations/InventoryScanner.tsx
+new file mode 100644
+--- /dev/null
++++ b/GoldInvoice.Client/src/features/operations/InventoryScanner.tsx
+@@ -0,0 +1,166 @@
++import { Search } from "lucide-react";
++import {
++  type FormEvent,
++  useCallback,
++  useMemo,
++  useState,
++} from "react";
++import { useHidScanner } from "../../platform/useHidScanner";
++import { useOperations } from "./OperationsContext";
++import { OperationalApiError } from "./operationsApi";
++import type { InventoryUnit } from "./operations.types";
++import { StatusBadge } from "./PagePrimitives";
++
++function messageOf(error: unknown): string {
++  if (error instanceof OperationalApiError && error.status === 404) {
++    return "قطعه‌ای با این بارکد، سریال یا شناسه پیدا نشد.";
++  }
++
++  return error instanceof Error
++    ? error.message
++    : "جست‌وجوی قطعه کامل نشد.";
++}
++
++function formatWeight(value?: number | null): string {
++  if (value == null) return "—";
++  return `${value.toLocaleString("fa-IR", { maximumFractionDigits: 3 })} گرم`;
++}
++
++export function InventoryScanner() {
++  const { data, request } = useOperations();
++  const [identifier, setIdentifier] = useState("");
++  const [unit, setUnit] = useState<InventoryUnit | null>(null);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  const product = useMemo(
++    () => data.products.find((item) => item.id === unit?.productId),
++    [data.products, unit?.productId],
++  );
++
++  const variant = useMemo(
++    () => product?.variants.find((item) => item.id === unit?.productVariantId),
++    [product, unit?.productVariantId],
++  );
++
++  const warehouse = useMemo(
++    () => data.warehouses.find((item) => item.id === unit?.warehouseId),
++    [data.warehouses, unit?.warehouseId],
++  );
++
++  const lookup = useCallback(
++    async (rawIdentifier: string) => {
++      const normalized = rawIdentifier.trim();
++
++      if (normalized.length < 3 || normalized.length > 128) {
++        setUnit(null);
++        setError("شناسه اسکن‌شده باید بین ۳ تا ۱۲۸ کاراکتر باشد.");
++        return;
++      }
++
++      setIdentifier(normalized);
++      setLoading(true);
++      setError(null);
++
++      try {
++        const found = await request<InventoryUnit>(
++          `/api/v1/inventory/units/lookup?identifier=${encodeURIComponent(normalized)}`,
++        );
++        setUnit(found);
++      } catch (lookupError) {
++        setUnit(null);
++        setError(messageOf(lookupError));
++      } finally {
++        setLoading(false);
++      }
++    },
++    [request],
++  );
++
++  useHidScanner({
++    enabled: !loading,
++    onScan: (code) => {
++      void lookup(code);
++    },
++  });
++
++  const submit = (event: FormEvent<HTMLFormElement>) => {
++    event.preventDefault();
++    void lookup(identifier);
++  };
++
++  return (
++    <section className="lux-card" aria-labelledby="inventory-scanner-title">
++      <div className="section-heading">
++        <div>
++          <h2 id="inventory-scanner-title">اسکن QR / بارکد قطعه</h2>
++          <p>
++            اسکنر USB در حالت Keyboard/HID را اسکن کن؛ یا شناسه را برای تست
++            دستی وارد کن. اطلاعات فقط از دیتابیس خوانده می‌شود.
++          </p>
++        </div>
++        <Search size={22} aria-hidden="true" />
++      </div>
++
++      <form className="entity-form entity-form--page" onSubmit={submit}>
++        <label className="form-field form-field--wide">
++          <span>بارکد، شماره سریال یا شناسه قطعه</span>
++          <input
++            value={identifier}
++            onChange={(event) => setIdentifier(event.target.value)}
++            dir="ltr"
++            autoComplete="off"
++            spellCheck={false}
++            maxLength={128}
++            placeholder="مثال: VND-U-8H4V7K2M"
++            aria-label="شناسه قطعه برای اسکن یا جست‌وجو"
++          />
++        </label>
++        <button className="secondary-button" type="submit" disabled={loading}>
++          <Search size={16} />
++          {loading ? "در حال جست‌وجو…" : "جست‌وجوی قطعه"}
++        </button>
++      </form>
++
++      {error && (
++        <div className="inline-error" role="alert">
++          {error}
++        </div>
++      )}
++
++      {unit && (
++        <div className="table-scroll">
++          <table className="data-table">
++            <thead>
++              <tr>
++                <th>محصول / مدل</th>
++                <th>بارکد / سریال</th>
++                <th>انبار</th>
++                <th>عیار</th>
++                <th>وزن کل</th>
++                <th>وزن خالص</th>
++                <th>وضعیت</th>
++              </tr>
++            </thead>
++            <tbody>
++              <tr>
++                <td>
++                  <strong>{product?.name || "محصول ثبت‌شده"}</strong>
++                  <small>{variant ? `${variant.name} · ${variant.sku}` : unit.productVariantId}</small>
++                </td>
++                <td className="numeric-cell">
++                  {unit.barcode || unit.serialNumber || unit.id}
++                </td>
++                <td>{warehouse?.name || unit.warehouseId}</td>
++                <td>{unit.karat ?? variant?.goldDetail?.karat ?? "—"}</td>
++                <td>{formatWeight(unit.actualGrossWeight ?? variant?.goldDetail?.grossWeight)}</td>
++                <td>{formatWeight(unit.actualNetGoldWeight ?? variant?.goldDetail?.netGoldWeight)}</td>
++                <td><StatusBadge status={unit.status} /></td>
++              </tr>
++            </tbody>
++          </table>
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -38,6 +38,7 @@ import { useAuthentication } from "../auth/AuthContext";
+ import { buildInvoiceDocumentHtml, invoiceFileName } from "../invoices/invoiceDocument";
+ import { DesktopBridgeError, isDesktopHost, sendDesktopCommand } from "../../platform/desktopBridge";
+ import { createIdempotencyKey, OperationalApiError } from "./operationsApi";
++import { InventoryScanner } from "./InventoryScanner";
+ import { useOperations } from "./OperationsContext";
+ import {
+   EmptyState,
+@@ -701,7 +702,8 @@ function InventoryPage({ path, onNavigate, onNotice }: RouteProps) {
+   const closeReceipt = () => { setFormState(initialFormState); setReceiptOpen(false); if (queryFlag(path, "receipt")) onNavigate("/inventory"); };
+   const submitWarehouse = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request<Warehouse>("/api/v1/inventory/warehouses", { method: "POST", body: JSON.stringify({ code: textValue(form, "code"), name: textValue(form, "name") }) }); onNotice("انبار جدید ثبت شد."); setFormState(initialFormState); setWarehouseOpen(false); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+   const submitReceipt = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request("/api/v1/inventory/receipts", { method: "POST", body: JSON.stringify({ warehouseId: textValue(form, "warehouseId"), productVariantId: textValue(form, "variantId"), quantity: numberValue(form, "quantity"), referenceType: "DesktopReceipt", reason: optionalText(form, "reason") }) }); onNotice("رسید انبار ثبت و موجودی به‌روزرسانی شد."); closeReceipt(); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+   return <ModuleBody><PageHeader icon={Boxes} title="انبار" description="موجودی واقعی هر انبار، رزرو، قیمت خرید میانگین و مقدار قابل فروش." actionLabel="موجودی اولیه / اصلاح" onAction={() => { setFormState(initialFormState); setReceiptOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/suppliers?purchase=1")}>خرید از تأمین‌کننده</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setWarehouseOpen(true); }}>انبار جدید</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />
++    <InventoryScanner />
+     <div className="module-metrics-grid"><MetricTile label="انبار فعال" value={String(data.warehouses.filter((item) => item.isActive).length)} hint="محل نگهداری" /><MetricTile label="موجودی کل" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0))} hint="قطعه" /><MetricTile label="قابل فروش" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="پس از رزرو" /></div>
+     {data.inventoryItems.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>انبار</th><th>محصول / مدل</th><th>موجودی</th><th>رزرو</th><th>قابل فروش</th><th>میانگین قیمت خرید</th></tr></thead><tbody>{data.inventoryItems.map((item) => { const variant = variants.find((value) => value.id === item.productVariantId); return <tr key={item.id}><td>{data.warehouses.find((value) => value.id === item.warehouseId)?.name || "—"}</td><td>{variant ? `${variant.productName} · ${variant.name}` : item.productVariantId}<small>{variant?.sku}</small></td><td>{item.quantityOnHand}</td><td>{item.quantityReserved}</td><td><strong>{item.quantityAvailable}</strong></td><td>{item.hasAcquisitionCost ? formatRials(item.averageUnitCostRials) : <span className="muted-text">ثبت نشده</span>}</td></tr>; })}</tbody></table></div></TableCard> : <EmptyState title="موجودی ثبت نشده" description="ابتدا انبار و مدل محصول را بساز، سپس خرید را از صفحه تأمین‌کنندگان ثبت کن." />}
+     <Modal open={warehouseOpen} title="ساخت انبار" onClose={() => { setFormState(initialFormState); setWarehouseOpen(false); }}><form className="entity-form" onSubmit={submitWarehouse}><FormField label="کد انبار"><input name="code" dir="ltr" required /></FormField><FormField label="نام انبار"><input name="name" required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت انبار" onCancel={() => { setFormState(initialFormState); setWarehouseOpen(false); }} /></form></Modal>
+diff --git a/PHASE9A-SCANNER-HANDOFF-FA.md b/PHASE9A-SCANNER-HANDOFF-FA.md
+new file mode 100644
+--- /dev/null
++++ b/PHASE9A-SCANNER-HANDOFF-FA.md
+@@ -0,0 +1,89 @@
++# Phase 9A — Scanner Foundation + Inventory Lookup
++
++## هدف
++
++این فاز اولین اتصال واقعی Scanner به جریان عملیاتی Vendome است، بدون تغییر
++مدل دیتابیس یا منطق مالی.
++
++اسکنرهای USB که در حالت **HID Keyboard Wedge** کار می‌کنند پشتیبانی می‌شوند.
++کد اسکن‌شده فقط به عنوان شناسه استفاده می‌شود و اطلاعات محصول، وزن، عیار،
++انبار و وضعیت قطعه همیشه از API/Database خوانده می‌شود.
++
++## تغییرات
++
++- اضافه شدن `useHidScanner` برای تشخیص اسکن سریع و پایان با Enter/Tab.
++- عدم رهگیری تایپ کاربر داخل input/textarea/select/contenteditable.
++- محدودیت طول شناسه: ۳ تا ۱۲۸ کاراکتر.
++- استفاده از endpoint موجود:
++
++  `GET /api/v1/inventory/units/lookup?identifier=...`
++
++- اضافه شدن `InventoryUnit` به TypeScript contracts.
++- اضافه شدن پنل Scan در صفحه انبار.
++- پشتیبانی همزمان از:
++  - Barcode
++  - Serial Number
++  - Inventory Unit Id
++- نمایش اطلاعات قطعه از دیتابیس:
++  - محصول
++  - مدل / SKU
++  - بارکد / سریال
++  - انبار
++  - عیار
++  - وزن کل
++  - وزن خالص
++  - وضعیت
++- خطای دوستانه برای 404 و خطاهای API.
++- هیچ Migration جدیدی ندارد.
++- هیچ Secret یا اطلاعات قیمت داخل QR ذخیره نمی‌شود.
++
++## تنظیم پیشنهادی Scanner
++
++Scanner را در حالت USB HID / Keyboard Wedge قرار بده:
++
++1. خروجی متن عادی (ASCII/keyboard).
++2. Suffix را روی `Enter` تنظیم کن. `Tab` هم پشتیبانی می‌شود.
++3. Prefix لازم نیست.
++4. Barcode/QR فقط یک identifier غیرحساس داشته باشد، مثال:
++
++   `VND-U-8H4V7K2M`
++
++## تست دستی
++
++1. API و Desktop را اجرا کن.
++2. با کاربری که `Inventory.Read` دارد وارد شو.
++3. وارد صفحه «انبار» شو.
++4. یک InventoryUnit موجود در دیتابیس با Barcode/Serial معتبر داشته باش.
++5. بدون قرار گرفتن Focus داخل فرم دیگر، Barcode را اسکن کن.
++6. نتیجه باید بلافاصله در جدول Scanner نمایش داده شود.
++7. همان کد را در Input پنل Scanner تایپ کن و Enter بزن؛ باید همان نتیجه برگردد.
++8. یک کد نامعتبر اسکن کن؛ پیام «قطعه‌ای ... پیدا نشد» باید نشان داده شود.
++9. هنگام تایپ در فرم‌های انبار اسکنر نباید تایپ کاربر را بدزدد.
++
++## بررسی Build
++
++از ریشه Repository:
++
++```powershell
++dotnet restore VendomeJewleryInvoiceManagement.sln
++dotnet build VendomeJewleryInvoiceManagement.sln --configuration Release --no-restore
++dotnet test VendomeJewleryInvoiceManagement.sln --configuration Release --no-build
++
++Push-Location GoldInvoice.Client
++npm ci
++npm run check
++npm run build
++Pop-Location
++```
++
++## خارج از Scope این فاز
++
++- افزودن مستقیم قطعه اسکن‌شده به سفارش/فاکتور.
++- تشخیص duplicate scan در سبد فروش.
++- رزرو InventoryUnit بعد از Scan.
++- تولید QR و Label Printing.
++- SDK اختصاصی برندهای Scanner.
++- Serial/COM scanner.
++
++این موارد بهتر است در Phase 9B به صورت جداگانه اضافه شوند تا منطق رزرو و فروش
++قطعه فیزیکی تحت تست یکپارچه قرار بگیرد.

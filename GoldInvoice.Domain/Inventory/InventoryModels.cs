@@ -315,6 +315,33 @@ public sealed class StockReservation : AuditableEntity, IProtectedFromHardDelete
 
     public DateTimeOffset? ReleasedAt { get; private set; }
 
+    public void Extend(DateTimeOffset expiresAt)
+    {
+        Guard.AgainstDefault(expiresAt, nameof(expiresAt));
+        EnsureActive();
+        if (expiresAt <= ExpiresAt)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(expiresAt),
+                "The extended reservation deadline must be later than the current deadline.");
+        }
+
+        ExpiresAt = expiresAt;
+    }
+    public void Reactivate(DateTimeOffset expiresAt)
+    {
+        Guard.AgainstDefault(expiresAt, nameof(expiresAt));
+
+        if (Status != StockReservationStatus.Expired)
+        {
+            throw new DomainConflictException(
+                "Only an expired reservation can be reactivated.");
+        }
+
+        Status = StockReservationStatus.Active;
+        ExpiresAt = expiresAt;
+        ReleasedAt = null;
+    }
     public void Confirm(DateTimeOffset confirmedAt)
     {
         Guard.AgainstDefault(confirmedAt, nameof(confirmedAt));

@@ -1,0 +1,58 @@
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index fd7c860..59c7da0 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -103,2 +103,24 @@ function optionalText(form: FormData, name: string): string | null {
+ 
++function invoiceWithCurrentStoreProfile(
++  invoice: Invoice,
++  storeProfile: StoreProfile | null,
++): Invoice {
++  if (!storeProfile) return invoice;
++
++  return {
++    ...invoice,
++    store: {
++      id: invoice.store?.id ?? "current-store-profile",
++      tradeName: storeProfile.tradeName,
++      legalName: storeProfile.legalName,
++      nationalId: storeProfile.nationalId,
++      economicCode: storeProfile.economicCode,
++      registrationNumber: storeProfile.registrationNumber,
++      phoneNumber: storeProfile.phoneNumber,
++      postalCode: storeProfile.postalCode,
++      addressLine: storeProfile.addressLine,
++    },
++  };
++}
++
+ function invoiceActualProfit(invoice: Invoice): number {
+@@ -236,2 +258,4 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
+   ) => {
++    invoice = invoiceWithCurrentStoreProfile(invoice, data.storeProfile);
++
+     if (!isDesktopHost()) {
+@@ -484,2 +508,5 @@ function InvoiceDetails({
+ }) {
++  const { data } = useOperations();
++  invoice = invoiceWithCurrentStoreProfile(invoice, data.storeProfile);
++
+   return (
+diff --git a/GoldInvoice.Client/src/features/operations/SupplierPurchasesPage.tsx b/GoldInvoice.Client/src/features/operations/SupplierPurchasesPage.tsx
+index 4c8b404..0c47b0b 100644
+--- a/GoldInvoice.Client/src/features/operations/SupplierPurchasesPage.tsx
++++ b/GoldInvoice.Client/src/features/operations/SupplierPurchasesPage.tsx
+@@ -363,3 +363,3 @@ export function SupplierPurchasesPage({ path, onNotice }: SupplierPurchasesPageP
+   return (
+-    <div className="module-page">
++    <div className="module-main">
+       <PageHeader
+diff --git a/GoldInvoice.Client/src/styles.css b/GoldInvoice.Client/src/styles.css
+index 29c79c6..38381fd 100644
+--- a/GoldInvoice.Client/src/styles.css
++++ b/GoldInvoice.Client/src/styles.css
+@@ -2301,3 +2301,3 @@ html[data-locale="en"] .auth-language-button {
+   gap: 8px;
+-  color: var(--background);
++  color: var(--navy-ink);
+   background: var(--navy);

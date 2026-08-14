@@ -1,0 +1,228 @@
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index fd7c860..a6813ca 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -36,6 +36,7 @@ import { DesktopBridgeError, isDesktopHost, sendDesktopCommand } from "../../pla
+ import { activeNumberLocale, rialsToTomans, tomansToRials } from "../../lib/money";
+ import { createIdempotencyKey, OperationalApiError } from "./operationsApi";
+ import { useOperations } from "./OperationsContext";
++import { useInventoryScanner } from "./useInventoryScanner";
+ import { SupplierPurchasesPage } from "./SupplierPurchasesPage";
+ import {
+   EmptyState,
+@@ -912,6 +913,7 @@ function InventoryPage({ path, onNavigate, onNotice }: RouteProps) {
+   const [receiptOpen, setReceiptOpen] = useState(queryFlag(path, "receipt"));
+   const [searchTerm, setSearchTerm] = useState("");
+   const [formState, setFormState] = useState<FormState>(initialFormState);
++  useInventoryScanner({ setSearchTerm, onNotice });
+   const variants = useMemo(() => data.products.flatMap((product) => product.variants.map((variant) => ({ ...variant, productName: product.name }))), [data.products]);
+   const latestPurchases = useMemo(() => {
+     const byVariant = new Map<string, SupplierPurchase>();
+diff --git a/GoldInvoice.Client/src/features/operations/useInventoryScanner.ts b/GoldInvoice.Client/src/features/operations/useInventoryScanner.ts
+new file mode 100644
+index 0000000..af8e2a5
+--- /dev/null
++++ b/GoldInvoice.Client/src/features/operations/useInventoryScanner.ts
+@@ -0,0 +1,89 @@
++import { useCallback, useRef } from "react";
++import { useHidScanner } from "../../platform/useHidScanner";
++import { useOperations } from "./OperationsContext";
++import { OperationalApiError } from "./operationsApi";
++
++interface InventoryUnitLookup {
++  id: string;
++  productId: string;
++  productVariantId: string;
++  warehouseId: string;
++  inventoryItemId: string;
++  serialNumber?: string | null;
++  barcode?: string | null;
++  actualGrossWeight?: number | null;
++  actualNetGoldWeight?: number | null;
++  karat?: number | null;
++  status: string;
++  receivedAt: string;
++  soldAt?: string | null;
++  rowVersion: string;
++}
++
++interface InventoryScannerOptions {
++  setSearchTerm(value: string): void;
++  onNotice(message: string): void;
++}
++
++function scannerErrorMessage(error: unknown): string {
++  if (error instanceof OperationalApiError) {
++    if (error.status === 404) return "قطعه‌ای با این بارکد، سریال یا شناسه پیدا نشد.";
++    if (error.status === 403) return "حساب فعلی مجوز مشاهده موجودی را ندارد.";
++  }
++
++  return error instanceof Error ? error.message : "جست‌وجوی قطعه اسکن‌شده کامل نشد.";
++}
++
++/**
++ * Connects a HID scanner to the existing secured inventory-unit lookup API.
++ * The QR/barcode is treated only as an opaque identifier; authoritative
++ * product, weight and status data always come from the backend/database.
++ */
++export function useInventoryScanner({
++  setSearchTerm,
++  onNotice,
++}: InventoryScannerOptions): void {
++  const { data, request } = useOperations();
++  const busyRef = useRef(false);
++  const lastScanRef = useRef<{ code: string; at: number } | null>(null);
++
++  const lookup = useCallback(async (rawCode: string) => {
++    const code = rawCode.trim();
++    if (code.length < 3 || code.length > 128 || busyRef.current) return;
++
++    const now = Date.now();
++    const previous = lastScanRef.current;
++    if (previous && previous.code === code && now - previous.at < 800) return;
++    lastScanRef.current = { code, at: now };
++
++    busyRef.current = true;
++    try {
++      const unit = await request<InventoryUnitLookup>(
++        `/api/v1/inventory/units/lookup?identifier=${encodeURIComponent(code)}`,
++      );
++
++      const product = data.products.find((item) => item.id === unit.productId);
++      const variant = product?.variants.find((item) => item.id === unit.productVariantId);
++      const warehouse = data.warehouses.find((item) => item.id === unit.warehouseId);
++
++      setSearchTerm(variant?.sku || variant?.name || product?.name || code);
++
++      const label = product && variant
++        ? `${product.name} · ${variant.name} (${variant.sku})`
++        : product?.name || variant?.name || code;
++      const location = warehouse?.name ? ` · ${warehouse.name}` : "";
++      const state = unit.status ? ` · ${unit.status}` : "";
++      onNotice(`اسکن موفق: ${label}${location}${state}`);
++    } catch (error) {
++      onNotice(scannerErrorMessage(error));
++    } finally {
++      busyRef.current = false;
++    }
++  }, [data.products, data.warehouses, onNotice, request, setSearchTerm]);
++
++  useHidScanner({
++    onScan: (code) => {
++      void lookup(code);
++    },
++  });
++}
+diff --git a/GoldInvoice.Client/src/platform/useHidScanner.ts b/GoldInvoice.Client/src/platform/useHidScanner.ts
+new file mode 100644
+index 0000000..044ed15
+--- /dev/null
++++ b/GoldInvoice.Client/src/platform/useHidScanner.ts
+@@ -0,0 +1,107 @@
++import { useEffect, useRef } from "react";
++
++export interface HidScannerOptions {
++  enabled?: boolean;
++  minLength?: number;
++  maxLength?: number;
++  maxInterKeyDelayMs?: number;
++  resetAfterMs?: number;
++  onScan(code: string): void;
++}
++
++function isEditableTarget(target: EventTarget | null): boolean {
++  if (!(target instanceof HTMLElement)) return false;
++  if (target.isContentEditable) return true;
++
++  const tagName = target.tagName.toLowerCase();
++  return tagName === "input" || tagName === "textarea" || tagName === "select";
++}
++
++/**
++ * Captures USB QR/barcode scanners configured as HID Keyboard Wedge devices.
++ *
++ * Expected scanner setup: decoded text followed by Enter or Tab. Human typing
++ * in editable controls is ignored and slow key sequences are discarded.
++ */
++export function useHidScanner({
++  enabled = true,
++  minLength = 3,
++  maxLength = 128,
++  maxInterKeyDelayMs = 80,
++  resetAfterMs = 250,
++  onScan,
++}: HidScannerOptions): void {
++  const callbackRef = useRef(onScan);
++
++  useEffect(() => {
++    callbackRef.current = onScan;
++  }, [onScan]);
++
++  useEffect(() => {
++    if (!enabled) return undefined;
++
++    let buffer = "";
++    let lastKeyAt = 0;
++    let resetTimer: number | undefined;
++
++    const reset = () => {
++      buffer = "";
++      lastKeyAt = 0;
++      if (resetTimer !== undefined) {
++        window.clearTimeout(resetTimer);
++        resetTimer = undefined;
++      }
++    };
++
++    const scheduleReset = () => {
++      if (resetTimer !== undefined) window.clearTimeout(resetTimer);
++      resetTimer = window.setTimeout(reset, resetAfterMs);
++    };
++
++    const handleKeyDown = (event: KeyboardEvent) => {
++      if (
++        event.defaultPrevented ||
++        event.repeat ||
++        event.ctrlKey ||
++        event.altKey ||
++        event.metaKey ||
++        isEditableTarget(event.target)
++      ) {
++        return;
++      }
++
++      const now = performance.now();
++
++      if (event.key === "Enter" || event.key === "Tab") {
++        const code = buffer.trim();
++        reset();
++
++        if (code.length < minLength) return;
++
++        event.preventDefault();
++        callbackRef.current(code);
++        return;
++      }
++
++      if (event.key.length !== 1) return;
++
++      if (lastKeyAt > 0 && now - lastKeyAt > maxInterKeyDelayMs) {
++        buffer = "";
++      }
++
++      buffer += event.key;
++      if (buffer.length > maxLength) {
++        buffer = buffer.slice(-maxLength);
++      }
++
++      lastKeyAt = now;
++      scheduleReset();
++    };
++
++    window.addEventListener("keydown", handleKeyDown, true);
++    return () => {
++      window.removeEventListener("keydown", handleKeyDown, true);
++      reset();
++    };
++  }, [enabled, maxInterKeyDelayMs, maxLength, minLength, resetAfterMs]);
++}

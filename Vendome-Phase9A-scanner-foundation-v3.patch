@@ -1,0 +1,298 @@
+diff --git a/GoldInvoice.Client/src/features/operations/InventoryScanner.tsx b/GoldInvoice.Client/src/features/operations/InventoryScanner.tsx
+new file mode 100644
+index 0000000..f5ad5fa
+--- /dev/null
++++ b/GoldInvoice.Client/src/features/operations/InventoryScanner.tsx
+@@ -0,0 +1,136 @@
++import { Search } from "lucide-react";
++import { type FormEvent, useCallback, useMemo, useState } from "react";
++import { useHidScanner } from "../../platform/useHidScanner";
++import { useOperations } from "./OperationsContext";
++import { OperationalApiError } from "./operationsApi";
++import type { InventoryUnit } from "./operations.types";
++import { StatusBadge } from "./PagePrimitives";
++
++function scannerMessage(error: unknown): string {
++  if (error instanceof OperationalApiError && error.status === 404) {
++    return "قطعه‌ای با این بارکد، سریال یا شناسه پیدا نشد.";
++  }
++
++  return error instanceof Error ? error.message : "جست‌وجوی قطعه کامل نشد.";
++}
++
++function formatWeight(value?: number | null): string {
++  if (value == null) return "—";
++  return `${value.toLocaleString("fa-IR", { maximumFractionDigits: 3 })} گرم`;
++}
++
++export function InventoryScanner() {
++  const { data, request } = useOperations();
++  const [identifier, setIdentifier] = useState("");
++  const [unit, setUnit] = useState<InventoryUnit | null>(null);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  const product = useMemo(
++    () => data.products.find((item) => item.id === unit?.productId),
++    [data.products, unit?.productId],
++  );
++  const variant = useMemo(
++    () => product?.variants.find((item) => item.id === unit?.productVariantId),
++    [product, unit?.productVariantId],
++  );
++  const warehouse = useMemo(
++    () => data.warehouses.find((item) => item.id === unit?.warehouseId),
++    [data.warehouses, unit?.warehouseId],
++  );
++
++  const lookup = useCallback(async (rawIdentifier: string) => {
++    const normalized = rawIdentifier.trim();
++    if (normalized.length < 3 || normalized.length > 128) {
++      setUnit(null);
++      setError("شناسه اسکن‌شده باید بین ۳ تا ۱۲۸ کاراکتر باشد.");
++      return;
++    }
++
++    setIdentifier(normalized);
++    setLoading(true);
++    setError(null);
++
++    try {
++      const found = await request<InventoryUnit>(
++        `/api/v1/inventory/units/lookup?identifier=${encodeURIComponent(normalized)}`,
++      );
++      setUnit(found);
++    } catch (lookupError) {
++      setUnit(null);
++      setError(scannerMessage(lookupError));
++    } finally {
++      setLoading(false);
++    }
++  }, [request]);
++
++  useHidScanner({
++    enabled: !loading,
++    onScan: (code) => { void lookup(code); },
++  });
++
++  const submit = (event: FormEvent<HTMLFormElement>) => {
++    event.preventDefault();
++    void lookup(identifier);
++  };
++
++  return (
++    <section className="lux-card" aria-labelledby="inventory-scanner-title">
++      <div className="section-heading">
++        <div>
++          <h2 id="inventory-scanner-title">اسکن QR / بارکد قطعه</h2>
++          <p>اسکنر USB در حالت Keyboard/HID را اسکن کن؛ یا شناسه را دستی وارد کن.</p>
++        </div>
++        <Search size={22} aria-hidden="true" />
++      </div>
++
++      <form className="entity-form entity-form--page" onSubmit={submit}>
++        <label className="form-field form-field--wide">
++          <span>بارکد، شماره سریال یا شناسه قطعه</span>
++          <input
++            value={identifier}
++            onChange={(event) => setIdentifier(event.target.value)}
++            dir="ltr"
++            autoComplete="off"
++            spellCheck={false}
++            maxLength={128}
++            placeholder="مثال: VND-U-8H4V7K2M"
++          />
++        </label>
++        <button className="secondary-button" type="submit" disabled={loading}>
++          <Search size={16} />
++          {loading ? "در حال جست‌وجو…" : "جست‌وجوی قطعه"}
++        </button>
++      </form>
++
++      {error && <div className="inline-error" role="alert">{error}</div>}
++
++      {unit && (
++        <div className="table-scroll">
++          <table className="data-table">
++            <thead>
++              <tr>
++                <th>محصول / مدل</th><th>بارکد / سریال</th><th>انبار</th>
++                <th>عیار</th><th>وزن کل</th><th>وزن خالص</th><th>وضعیت</th>
++              </tr>
++            </thead>
++            <tbody>
++              <tr>
++                <td>
++                  <strong>{product?.name || "محصول ثبت‌شده"}</strong>
++                  <small>{variant ? `${variant.name} · ${variant.sku}` : unit.productVariantId}</small>
++                </td>
++                <td className="numeric-cell">{unit.barcode || unit.serialNumber || unit.id}</td>
++                <td>{warehouse?.name || unit.warehouseId}</td>
++                <td>{unit.karat ?? variant?.goldDetail?.karat ?? "—"}</td>
++                <td>{formatWeight(unit.actualGrossWeight ?? variant?.goldDetail?.grossWeight)}</td>
++                <td>{formatWeight(unit.actualNetGoldWeight ?? variant?.goldDetail?.netGoldWeight)}</td>
++                <td><StatusBadge status={unit.status} /></td>
++              </tr>
++            </tbody>
++          </table>
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+index dcd6264..053f296 100644
+--- a/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
++++ b/GoldInvoice.Client/src/features/operations/OperationsPages.tsx
+@@ -2,6 +2,7 @@ import { useAuthentication } from "../auth/AuthContext";
+ import { buildInvoiceDocumentHtml, invoiceFileName } from "../invoices/invoiceDocument";
+ import { DesktopBridgeError, isDesktopHost, sendDesktopCommand } from "../../platform/desktopBridge";
+ import { createIdempotencyKey, OperationalApiError } from "./operationsApi";
++import { InventoryScanner } from "./InventoryScanner";
+ import { useOperations } from "./OperationsContext";
+ import {
+   EmptyState,
+@@ -17,5 +18,6 @@ function InventoryPage({ path, onNavigate, onNotice }: RouteProps) {
+   const submitWarehouse = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request<Warehouse>("/api/v1/inventory/warehouses", { method: "POST", body: JSON.stringify({ code: textValue(form, "code"), name: textValue(form, "name") }) }); onNotice("انبار جدید ثبت شد."); setFormState(initialFormState); setWarehouseOpen(false); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+   const submitReceipt = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request("/api/v1/inventory/receipts", { method: "POST", body: JSON.stringify({ warehouseId: textValue(form, "warehouseId"), productVariantId: textValue(form, "variantId"), quantity: numberValue(form, "quantity"), referenceType: "DesktopReceipt", reason: optionalText(form, "reason") }) }); onNotice("رسید انبار ثبت و موجودی به‌روزرسانی شد."); closeReceipt(); await refresh(); } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+   return <ModuleBody><PageHeader icon={Boxes} title="انبار" description="موجودی واقعی هر انبار، رزرو، قیمت خرید میانگین و مقدار قابل فروش." actionLabel="موجودی اولیه / اصلاح" onAction={() => { setFormState(initialFormState); setReceiptOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/suppliers?purchase=1")}>خرید از تأمین‌کننده</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setWarehouseOpen(true); }}>انبار جدید</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />
++    <InventoryScanner />
+     <div className="module-metrics-grid"><MetricTile label="انبار فعال" value={String(data.warehouses.filter((item) => item.isActive).length)} hint="محل نگهداری" /><MetricTile label="موجودی کل" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0))} hint="قطعه" /><MetricTile label="قابل فروش" value={String(data.inventoryItems.reduce((sum, item) => sum + item.quantityAvailable, 0))} hint="پس از رزرو" /></div>
+ }
+diff --git a/GoldInvoice.Client/src/features/operations/operations.types.ts b/GoldInvoice.Client/src/features/operations/operations.types.ts
+index daa69b0..e1c6815 100644
+--- a/GoldInvoice.Client/src/features/operations/operations.types.ts
++++ b/GoldInvoice.Client/src/features/operations/operations.types.ts
+@@ -17,6 +17,23 @@ export interface InventoryItem {
+   rowVersion: string;
+ }
+ 
++export interface InventoryUnit {
++  id: string;
++  productId: string;
++  productVariantId: string;
++  warehouseId: string;
++  inventoryItemId: string;
++  serialNumber?: string | null;
++  barcode?: string | null;
++  actualGrossWeight?: number | null;
++  actualNetGoldWeight?: number | null;
++  karat?: number | null;
++  status: string;
++  receivedAt: string;
++  soldAt?: string | null;
++  rowVersion: string;
++}
++
+ export interface OrderAddress {
+   id: string;
+   customerAddressId?: string | null;
+diff --git a/GoldInvoice.Client/src/platform/useHidScanner.ts b/GoldInvoice.Client/src/platform/useHidScanner.ts
+new file mode 100644
+index 0000000..9a8afd9
+--- /dev/null
++++ b/GoldInvoice.Client/src/platform/useHidScanner.ts
+@@ -0,0 +1,103 @@
++import { useEffect, useRef } from "react";
++
++export interface HidScannerOptions {
++  enabled?: boolean;
++  minLength?: number;
++  maxLength?: number;
++  maxInterKeyDelayMs?: number;
++  resetAfterMs?: number;
++  onScan(code: string): void;
++}
++
++function isEditableTarget(target: EventTarget | null): boolean {
++  if (!(target instanceof HTMLElement)) return false;
++  if (target.isContentEditable) return true;
++
++  const tagName = target.tagName.toLowerCase();
++  return tagName === "input" || tagName === "textarea" || tagName === "select";
++}
++
++/**
++ * Captures USB barcode/QR scanners configured as HID Keyboard Wedge devices.
++ * The scanner should send the decoded identifier followed by Enter or Tab.
++ */
++export function useHidScanner({
++  enabled = true,
++  minLength = 3,
++  maxLength = 128,
++  maxInterKeyDelayMs = 80,
++  resetAfterMs = 250,
++  onScan,
++}: HidScannerOptions): void {
++  const callbackRef = useRef(onScan);
++
++  useEffect(() => {
++    callbackRef.current = onScan;
++  }, [onScan]);
++
++  useEffect(() => {
++    if (!enabled) return undefined;
++
++    let buffer = "";
++    let lastKeyAt = 0;
++    let resetTimer: number | undefined;
++
++    const reset = () => {
++      buffer = "";
++      lastKeyAt = 0;
++      if (resetTimer !== undefined) {
++        window.clearTimeout(resetTimer);
++        resetTimer = undefined;
++      }
++    };
++
++    const scheduleReset = () => {
++      if (resetTimer !== undefined) window.clearTimeout(resetTimer);
++      resetTimer = window.setTimeout(reset, resetAfterMs);
++    };
++
++    const handleKeyDown = (event: KeyboardEvent) => {
++      if (
++        event.defaultPrevented ||
++        event.repeat ||
++        event.ctrlKey ||
++        event.altKey ||
++        event.metaKey ||
++        isEditableTarget(event.target)
++      ) {
++        return;
++      }
++
++      const now = performance.now();
++
++      if (event.key === "Enter" || event.key === "Tab") {
++        const code = buffer.trim();
++        reset();
++
++        if (code.length < minLength) return;
++
++        event.preventDefault();
++        callbackRef.current(code);
++        return;
++      }
++
++      if (event.key.length !== 1) return;
++
++      if (lastKeyAt > 0 && now - lastKeyAt > maxInterKeyDelayMs) {
++        buffer = "";
++      }
++
++      buffer += event.key;
++      if (buffer.length > maxLength) buffer = buffer.slice(-maxLength);
++
++      lastKeyAt = now;
++      scheduleReset();
++    };
++
++    window.addEventListener("keydown", handleKeyDown, true);
++    return () => {
++      window.removeEventListener("keydown", handleKeyDown, true);
++      reset();
++    };
++  }, [enabled, maxInterKeyDelayMs, maxLength, minLength, resetAfterMs]);
++}

@@ -1,0 +1,50 @@
+/* Phase 9B scoped UI hotfixes. */
+.purchase-wizard {
+  min-width: 0;
+  max-height: calc(100dvh - 176px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.purchase-wizard .wizard-panel { min-width: 0; }
+.modal-card:has(.purchase-wizard) { max-height: calc(100dvh - 24px); }
+.modal-card:has(.purchase-wizard) .modal-body {
+  min-height: 0;
+  max-height: calc(100dvh - 118px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+:root[data-theme="dark"] .primary-button {
+  color: #fffdf8;
+  background: linear-gradient(135deg, var(--navy-soft), color-mix(in oklch, var(--navy-soft) 78%, var(--gold) 22%));
+  border: 1px solid color-mix(in oklch, var(--gold) 30%, var(--border));
+  box-shadow: 0 8px 20px -14px rgb(0 0 0 / 0.88);
+}
+:root[data-theme="dark"] .primary-button:hover:not(:disabled) {
+  color: #ffffff;
+  background: linear-gradient(135deg, color-mix(in oklch, var(--navy-soft) 86%, var(--gold) 14%), color-mix(in oklch, var(--navy-soft) 68%, var(--gold) 32%));
+  border-color: color-mix(in oklch, var(--gold) 48%, var(--border));
+}
+:root[data-theme="dark"] .primary-button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--gold) 72%, white);
+  outline-offset: 2px;
+}
+:root[data-theme="dark"] .wizard-steps .is-current button,
+:root[data-theme="dark"] .wizard-steps .is-active button { color: #fffdf8; }
+@media (max-height: 760px) {
+  .purchase-wizard { max-height: calc(100dvh - 132px); }
+  .purchase-wizard .wizard-panel { min-height: 0 !important; }
+  .modal-layer:has(.purchase-wizard) {
+    padding-block: 12px;
+    place-items: start center;
+    overflow-y: auto;
+  }
+}
+@media (max-width: 760px) {
+  .purchase-wizard .wizard-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+}

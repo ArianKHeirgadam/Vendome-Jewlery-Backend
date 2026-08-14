@@ -4217,3 +4217,168 @@ html[data-locale="en"] .auth-language-button {
     left: 14px;
   }
 }
+
+/* Phase 9B safe UI fixes */
+/* Supplier wizard: keep the dialog within the viewport and make its body scrollable. */
+.modal-layer:has(.purchase-wizard) {
+  align-items: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal-card:has(.purchase-wizard) {
+  display: flex;
+  width: min(940px, 100%);
+  max-height: calc(100dvh - 24px);
+  min-height: 0;
+  flex-direction: column;
+  margin-block: 12px;
+}
+
+.modal-card:has(.purchase-wizard) > header {
+  flex: 0 0 auto;
+}
+
+.modal-card:has(.purchase-wizard) > .modal-body {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.purchase-wizard {
+  min-width: 0;
+  min-height: 0;
+}
+
+.purchase-wizard .wizard-panel {
+  min-width: 0;
+  min-height: min(330px, 42vh);
+  max-height: min(520px, 52vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Dark mode: keep primary/selected actions visibly separated from the background. */
+:root[data-theme="dark"] .primary-button {
+  color: #fffdf8;
+  background: linear-gradient(135deg, #29496f, #203b5f);
+  border: 1px solid color-mix(in oklch, var(--gold) 26%, #29496f);
+}
+
+:root[data-theme="dark"] .primary-button:hover:not(:disabled) {
+  color: #ffffff;
+  background: linear-gradient(135deg, #355c86, #29496f);
+  border-color: color-mix(in oklch, var(--gold) 46%, #355c86);
+}
+
+:root[data-theme="dark"] .wizard-steps .is-current button > span,
+:root[data-theme="dark"] .wizard-mode-switch button.is-active,
+:root[data-theme="dark"] .reference-tabs button.is-active {
+  color: #fffdf8;
+  background: color-mix(in oklch, var(--navy-soft) 82%, var(--gold) 18%);
+  border-color: color-mix(in oklch, var(--gold) 40%, var(--border));
+}
+
+@media (max-height: 760px) {
+  .modal-layer:has(.purchase-wizard) {
+    padding-block: 8px;
+  }
+
+  .modal-card:has(.purchase-wizard) {
+    max-height: calc(100dvh - 16px);
+    margin-block: 0;
+  }
+
+  .purchase-wizard .wizard-panel {
+    min-height: 0;
+    max-height: 46vh;
+  }
+}
+
+@media (max-width: 760px) {
+  .purchase-wizard .wizard-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+
+  .purchase-wizard .wizard-steps li:not(:last-child)::after {
+    display: none;
+  }
+}
+/* VENDOME_MARKET_RAIL_V5_START */
+/*
+ * Market rail numeric typography.
+ * IranSans is used only when it already exists on this Windows machine.
+ * No font binary is copied into the repository.
+ */
+.market-rail .market-row {
+  min-width: 0;
+  gap: 7px;
+}
+
+.market-rail .market-label {
+  flex: 0 0 auto;
+}
+
+.market-rail .market-value-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.market-rail .market-value-wrap strong {
+  font-family: "IRANSansXFaNum", "IRANSansX", "IRANSans", "IRANSansWeb", "Vazirmatn", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* VENDOME_MARKET_RAIL_V5_END */
+
+/* VENDOME_MANUAL_MARKET_V6_CSS_START */
+.market-manual-refresh {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  gap: 6px;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.market-manual-refresh:hover {
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--gold) 7%, transparent);
+}
+
+.market-manual-refresh:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.market-manual-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.market-refresh-error {
+  margin: -4px 0 8px;
+  padding: 5px 7px;
+  color: var(--danger);
+  font-size: 8px;
+  line-height: 1.6;
+}
+/* VENDOME_MANUAL_MARKET_V6_CSS_END */

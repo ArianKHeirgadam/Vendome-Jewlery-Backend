@@ -6,9 +6,12 @@ public static class SecurityRoles
 
     public const string Admin = "Admin";
 
+
+
+    public const string Employee = "Employee";
     public const string Customer = "Customer";
 
-    public static readonly IReadOnlyList<string> All = [Owner, Admin, Customer];
+    public static readonly IReadOnlyList<string> All = [Owner, Admin, Employee, Customer];
 }
 
 public static class SecurityPermissions

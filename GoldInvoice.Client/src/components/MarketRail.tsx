@@ -5,6 +5,7 @@ import type {
   MarketQuote,
 } from "../features/dashboard/dashboard.types";
 
+import { useOperations } from "../features/operations/OperationsContext";
 interface MarketRailProps {
   market: DashboardSnapshot["market"];
 }
@@ -92,7 +93,30 @@ function MarketClock({ date }: { date: Date }) {
 }
 
 export function MarketRail({ market }: MarketRailProps) {
-  const [now, setNow] = useState(() => new Date());
+  
+  /* VENDOME_MANUAL_MARKET_V6_START */
+  const { request, refresh } = useOperations();
+  const [marketRefreshing, setMarketRefreshing] = useState(false);
+  const [marketRefreshError, setMarketRefreshError] = useState<string | null>(null);
+
+  const refreshMarket = async () => {
+    if (marketRefreshing) return;
+    setMarketRefreshing(true);
+    setMarketRefreshError(null);
+    try {
+      await request("/api/v1/pricing/market/sources/NAVASAN/poll", {
+        method: "POST",
+      });
+      await refresh();
+    } catch (error) {
+      setMarketRefreshError(
+        error instanceof Error ? error.message : "به‌روزرسانی نرخ بازار کامل نشد.",
+      );
+    } finally {
+      setMarketRefreshing(false);
+    }
+  };
+  /* VENDOME_MANUAL_MARKET_V6_END */const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -108,11 +132,26 @@ export function MarketRail({ market }: MarketRailProps) {
     <aside className="market-rail" aria-label="بازار زنده">
       <div className="market-heading">
         <h2>بازار زنده</h2>
-        <span>
-          {market.updatedAt}
-          <RefreshCw size={12} strokeWidth={1.45} aria-hidden="true" />
-        </span>
+        <button
+          className="market-manual-refresh"
+          type="button"
+          title="دریافت نرخ جدید طلا و دلار"
+          aria-label="دریافت نرخ جدید طلا و دلار"
+          disabled={marketRefreshing}
+          onClick={() => void refreshMarket()}
+        >
+          <span>{marketRefreshing ? "در حال دریافت…" : market.updatedAt}</span>
+          <RefreshCw
+            className={marketRefreshing ? "spin" : ""}
+            size={14}
+            strokeWidth={1.6}
+            aria-hidden="true"
+          />
+        </button>
       </div>
+      {marketRefreshError && (
+        <div className="market-refresh-error" role="status">{marketRefreshError}</div>
+      )}
 
       <section className="market-card">
         <h3>قیمت طلا</h3>

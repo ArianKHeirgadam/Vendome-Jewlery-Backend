@@ -5,7 +5,6 @@ import {
   Calculator,
   FileText,
   Gem,
-  HeartHandshake,
   IdCard,
   LayoutDashboard,
   Settings,
@@ -39,7 +38,6 @@ const navItems: NavItem[] = [
   { label: "گزارش‌ها", path: "/reports", icon: BarChart3 },
   { label: "کارکنان", path: "/employees", icon: IdCard },
   { label: "تأمین‌کنندگان", path: "/suppliers", icon: Truck },
-  { label: "ارتباط با مشتری", path: "/crm", icon: HeartHandshake },
   { label: "تنظیمات", path: "/settings", icon: Settings },
 ];
 

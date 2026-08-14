@@ -1,0 +1,107 @@
+.accounting-quick-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 18px;
+  gap: 12px;
+}
+
+.accounting-link-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  padding: 15px 16px;
+  gap: 11px;
+  text-align: right;
+  cursor: pointer;
+}
+
+.accounting-link-card > svg {
+  flex: 0 0 auto;
+  color: var(--gold);
+}
+
+.accounting-link-card span {
+  min-width: 0;
+}
+
+.accounting-link-card strong,
+.accounting-link-card small {
+  display: block;
+}
+
+.accounting-link-card strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.accounting-link-card small {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.pending-installment-invoices {
+  margin-bottom: 18px;
+}
+
+.pending-invoice-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.pending-invoice-heading h2 {
+  margin: 0 0 3px;
+  font-size: 14px;
+}
+
+.pending-invoice-heading p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.pending-invoice-badge {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  padding: 0 9px;
+  gap: 5px;
+  color: color-mix(in oklch, var(--gold) 78%, var(--foreground));
+  background: color-mix(in oklch, var(--gold) 8%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--gold) 30%, var(--border));
+  border-radius: 999px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.bank-interest-section {
+  margin-top: 18px;
+}
+
+.bank-interest-section-heading {
+  margin-bottom: 10px;
+}
+
+.bank-interest-section-heading h2 {
+  margin: 0 0 3px;
+  font-size: 15px;
+}
+
+.bank-interest-section-heading p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.bank-interest-amount {
+  color: var(--foreground);
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .accounting-quick-links {
+    grid-template-columns: 1fr;
+  }
+}

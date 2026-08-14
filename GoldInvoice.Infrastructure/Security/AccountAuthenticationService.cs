@@ -52,9 +52,20 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
             ? userManager.NormalizeName(normalizedPhoneNumber) ?? normalizedPhoneNumber
             : userManager.NormalizeEmail(identifier) ?? identifier.ToUpperInvariant();
         var identifierHash = SecurityHashing.Sha256(normalizedIdentifier);
-        var user = isPhoneNumber
-            ? await userManager.FindByNameAsync(normalizedPhoneNumber)
-            : await userManager.FindByEmailAsync(identifier);
+        ApplicationUser? user;
+        if (isPhoneNumber)
+        {
+            // New staff accounts use mobile as UserName. The DB fallback also
+            // keeps older Admin accounts usable by their already-stored phone.
+            user = await userManager.FindByNameAsync(normalizedPhoneNumber);
+            user ??= await dbContext.Users.FirstOrDefaultAsync(
+                candidate => candidate.PhoneNumber == normalizedPhoneNumber,
+                cancellationToken);
+        }
+        else
+        {
+            user = await userManager.FindByEmailAsync(identifier);
+        }
 
         if (user is null)
         {
@@ -109,10 +120,43 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
             throw new AuthenticationRejectedException();
         }
 
-        var access = await SecurityAccessQueries.ResolveAsync(dbContext, user.Id, cancellationToken);
-        var mfaRequired = user.MfaRequired || user.TwoFactorEnabled ||
-            access.Roles.Contains(SecurityRoles.Owner, StringComparer.Ordinal) ||
-            access.Roles.Contains(SecurityRoles.Admin, StringComparer.Ordinal);
+        var access = await SecurityAccessQueries.ResolveAsync(
+            dbContext,
+            user.Id,
+            cancellationToken);
+
+        var isOwner = access.Roles.Contains(
+            SecurityRoles.Owner,
+            StringComparer.Ordinal);
+        var isStaff =
+            access.Roles.Contains(
+                SecurityRoles.Admin,
+                StringComparer.Ordinal) ||
+            access.Roles.Contains(
+                SecurityRoles.Employee,
+                StringComparer.Ordinal);
+
+        // Management desktop sign-in identifiers are role-specific:
+        // Owner = email only. Non-owner staff = mobile only.
+        // Customer accounts are intentionally not management logins.
+        var identifierAllowed =
+            (isOwner && !isPhoneNumber) ||
+            (isStaff && isPhoneNumber);
+
+        if (!identifierAllowed)
+        {
+            await RecordLoginAttemptAsync(
+                identifierHash,
+                succeeded: false,
+                user.Id,
+                InvalidCredentialsReason,
+                requestContext,
+                cancellationToken);
+            throw new AuthenticationRejectedException();
+        }
+
+        // Authenticator/MFA belongs ONLY to the Owner.
+        var mfaRequired = isOwner;
 
         if (mfaRequired && !user.TwoFactorEnabled)
         {
@@ -550,9 +594,7 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
         }
 
         var access = await SecurityAccessQueries.ResolveAsync(dbContext, user.Id, cancellationToken);
-        var mustEnroll = user.MfaRequired ||
-            access.Roles.Contains(SecurityRoles.Owner, StringComparer.Ordinal) ||
-            access.Roles.Contains(SecurityRoles.Admin, StringComparer.Ordinal);
+        var mustEnroll = access.Roles.Contains(SecurityRoles.Owner, StringComparer.Ordinal);
         if (!mustEnroll)
         {
             throw new AuthenticationRejectedException();

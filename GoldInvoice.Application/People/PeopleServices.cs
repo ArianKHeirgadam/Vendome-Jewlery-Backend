@@ -22,8 +22,9 @@ public sealed record CreateCustomerCommand(
 public sealed record CreateEmployeeCommand(
     string DisplayName,
     string Email,
-    string? PhoneNumber,
-    string TemporaryPassword);
+    string PhoneNumber,
+    string TemporaryPassword,
+    string RoleName);
 
 public interface IPeopleDirectoryService
 {

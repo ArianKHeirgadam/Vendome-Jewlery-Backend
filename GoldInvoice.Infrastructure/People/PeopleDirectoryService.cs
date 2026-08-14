@@ -20,7 +20,7 @@ internal sealed class PeopleDirectoryService(
     public Task<IReadOnlyList<PersonInfo>> GetEmployeesAsync(
         string? query,
         CancellationToken cancellationToken) =>
-        GetPeopleAsync([SecurityRoles.Owner, SecurityRoles.Admin], query, cancellationToken);
+        GetPeopleAsync([SecurityRoles.Owner, SecurityRoles.Admin, SecurityRoles.Employee], query, cancellationToken);
 
     public Task<PersonInfo> CreateCustomerAsync(
         CreateCustomerCommand command,
@@ -35,6 +35,7 @@ internal sealed class PeopleDirectoryService(
             command.Email,
             command.PhoneNumber,
             command.TemporaryPassword,
+            command.RoleName,
             cancellationToken);
 
     private async Task<IReadOnlyList<PersonInfo>> GetPeopleAsync(
@@ -111,13 +112,31 @@ internal sealed class PeopleDirectoryService(
     private async Task<PersonInfo> CreateEmployeeAccountAsync(
         string displayName,
         string email,
-        string? phoneNumber,
+        string phoneNumber,
         string temporaryPassword,
+        string roleName,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        var normalizedRole = roleName?.Trim() switch
+        {
+            SecurityRoles.Admin => SecurityRoles.Admin,
+            SecurityRoles.Employee => SecurityRoles.Employee,
+            _ => throw new ArgumentException(
+                "Employee role must be Admin or Employee.",
+                nameof(roleName))
+        };
+
         var normalizedEmail = email.Trim();
-        if (await userManager.FindByEmailAsync(normalizedEmail) is not null)
+        var normalizedPhoneNumber =
+            ContactIdentifierNormalizer.NormalizePhoneNumber(phoneNumber);
+
+        if (await userManager.FindByEmailAsync(normalizedEmail) is not null ||
+            await userManager.FindByNameAsync(normalizedPhoneNumber) is not null ||
+            await dbContext.Users.AnyAsync(
+                user => user.PhoneNumber == normalizedPhoneNumber,
+                cancellationToken))
         {
             throw new ApplicationConflictException();
         }
@@ -125,21 +144,21 @@ internal sealed class PeopleDirectoryService(
         var user = new ApplicationUser(displayName)
         {
             Email = normalizedEmail,
-            UserName = normalizedEmail,
-            PhoneNumber = string.IsNullOrWhiteSpace(phoneNumber)
-                ? null
-                : ContactIdentifierNormalizer.NormalizePhoneNumber(phoneNumber),
-            EmailConfirmed = true
-        };
-        user.RequireMfa();
+            EmailConfirmed = true,
 
+            // All non-owner staff sign in with mobile number.
+            UserName = normalizedPhoneNumber,
+            PhoneNumber = normalizedPhoneNumber,
+            PhoneNumberConfirmed = true
+        };
+
+        // Non-owner staff are intentionally created without an MFA requirement.
         return await CreatePersonAsync(
             user,
             temporaryPassword,
-            SecurityRoles.Admin,
+            normalizedRole,
             cancellationToken);
     }
-
     private async Task<PersonInfo> CreatePersonAsync(
         ApplicationUser user,
         string temporaryPassword,

@@ -22,6 +22,7 @@ import {
   Trash2,
   Truck,
   UserRound,
+  IdCard,
 } from "lucide-react";
 import {
   type FormEvent,
@@ -36,7 +37,20 @@ import { DesktopBridgeError, isDesktopHost, sendDesktopCommand } from "../../pla
 import { activeNumberLocale, rialsToTomans, tomansToRials } from "../../lib/money";
 import { createIdempotencyKey, OperationalApiError } from "./operationsApi";
 import { useOperations } from "./OperationsContext";
-import { SupplierPurchasesPage } from "./SupplierPurchasesPage";
+import { useInventoryScanner } from "./useInventoryScanner";
+import { SupplierPurchasesPage } from "./SupplierPurchasesPage";
+import {
+  InstallmentSetupModal,
+  TrustFundPaymentModal,
+  type InstallmentPlan,
+  type TrustFundAllocationResult,
+} from "./FlexiblePaymentModals";
+import { InstallmentsPage, TrustFundsPage } from "./AccountingFinancePages";
+import { AccountingQuickLinks, BankInterestPage } from "./BankInterestPage";
+import { PendingInstallmentInvoices } from "./PendingInstallmentInvoices";
+import { FinancialWorkspacePage } from "./FinancialWorkspacePage";
+import { ProductCategoryManager } from "./ProductCategoryManager";
+import "./operations-hotfixes.css";
 import {
   EmptyState,
   FeatureNavigationCard,
@@ -99,6 +113,28 @@ function textValue(form: FormData, name: string): string {
 
 function optionalText(form: FormData, name: string): string | null {
   return textValue(form, name) || null;
+}
+
+function invoiceWithCurrentStoreProfile(
+  invoice: Invoice,
+  storeProfile: StoreProfile | null,
+): Invoice {
+  if (!storeProfile) return invoice;
+
+  return {
+    ...invoice,
+    store: {
+      id: invoice.store?.id || "current-store-profile",
+      tradeName: storeProfile.tradeName,
+      legalName: storeProfile.legalName,
+      nationalId: storeProfile.nationalId,
+      economicCode: storeProfile.economicCode,
+      registrationNumber: storeProfile.registrationNumber,
+      phoneNumber: storeProfile.phoneNumber,
+      postalCode: storeProfile.postalCode,
+      addressLine: storeProfile.addressLine,
+    },
+  };
 }
 
 function invoiceActualProfit(invoice: Invoice): number {
@@ -234,6 +270,8 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
     action: "preview" | "save" | "print",
     copies = 1,
   ) => {
+    invoice = invoiceWithCurrentStoreProfile(invoice, data.storeProfile);
+
     if (!isDesktopHost()) {
       if (action === "print") {
         const preview = window.open("", "_blank", "noopener,noreferrer");
@@ -371,7 +409,7 @@ function InvoicesPage({ path, onNavigate, onNotice }: RouteProps) {
         actionLabel="ایجاد فاکتور"
         onAction={() => onNavigate("/orders/new")}
       />
-      <DataNotice />
+      <DataNotice /><PendingInstallmentInvoices />
       <section className="reference-filter-bar fade-up" aria-label="فیلتر فاکتورها">
         <label className="reference-search">
           <Search size={16} />
@@ -482,6 +520,9 @@ function InvoiceDetails({
   canCorrect: boolean;
   canPrint: boolean;
 }) {
+  const { data } = useOperations();
+  invoice = invoiceWithCurrentStoreProfile(invoice, data.storeProfile);
+
   return (
     <div className="invoice-preview-panel">
       <div className="invoice-preview-actions">
@@ -712,8 +753,8 @@ function CustomersPage({ path, onNavigate, onNotice }: RouteProps) {
                   <button type="button" onClick={() => onNavigate(`/invoices?customerId=${customer.id}`)}>فاکتورها</button>
                   <button type="button" onClick={() => onNavigate(`/orders?customerId=${customer.id}`)}>اقساط</button>
                   <button type="button" onClick={() => addressCount > 0 ? void loadAddresses(customer, "view") : openNewAddress(customer)}>مدارک</button>
-                  <button type="button" onClick={() => onNavigate(`/crm?customerId=${customer.id}`)}>یادداشت‌ها</button>
-                  <button type="button" onClick={() => onNavigate(`/crm?customerId=${customer.id}`)}>ارتباطات</button>
+                  
+                  
                 </footer>
               </article>
             );
@@ -782,7 +823,10 @@ function ProductPhoto({ product }: { product: Product }) {
       return () => { active = false; };
     }
 
-    void authorizedFetch(`/api/v1/catalog/products/${product.id}/images/${primary.id}`)
+    void authorizedFetch(`/api/v1/catalog/products/${product.id}/images/${primary.id}`, {
+      cache: "no-store",
+      headers: { Accept: primary.contentType || "image/*" },
+    })
       .then((response) => {
         if (!response.ok) throw new Error("تصویر محصول دریافت نشد.");
         return response.blob();
@@ -796,7 +840,7 @@ function ProductPhoto({ product }: { product: Product }) {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [authorizedFetch, primary?.id, product.id]);
+  }, [authorizedFetch, primary?.id, primary?.rowVersion, product.id]);
 
   return source
     ? <img className="product-photo" src={source} alt={primary?.altText || product.name} />
@@ -898,6 +942,7 @@ function ProductsPage({ path, onNavigate, onNotice }: RouteProps) {
   }
   return <ModuleBody><ReferencePageHeader eyebrow="کاتالوگ" title="کلکسیون‌ها" description="مدیریت کلکسیون‌ها، تصاویر، کدهای محصول و مشخصات تخصصی هر قطعه." actionLabel="محصول جدید" onAction={() => { setFormState(initialFormState); setCreateOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/products")}>بازگشت</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />
     <div className="module-metrics-grid"><MetricTile label="محصول" value={String(data.products.length)} hint="کالای اصلی" /><MetricTile label="مدل کالا" value={String(data.products.reduce((sum, item) => sum + item.variants.length, 0))} hint="SKU ثبت‌شده" /><MetricTile label="دسته‌بندی" value={String(data.categories.length)} hint="ساختار کاتالوگ" /></div>
+    <ProductCategoryManager onNotice={onNotice} />
     {categoryFilter && <div className="inline-help">فیلتر دسته‌بندی فعال است. <button className="text-button" type="button" onClick={() => onNavigate("/products/collections")}>نمایش همه محصولات</button></div>}
     {filteredProducts.length ? <div className="card-grid">{filteredProducts.map((product) => <article className="lux-card entity-card product-card" key={product.id}><ProductPhoto product={product} /><header><div><small>{data.categories.find((item) => item.id === product.productCategoryId)?.name || "بدون دسته"}</small><h3>{product.name}</h3></div><StatusBadge status={product.isActive ? "Active" : "Inactive"} /></header><p>{product.description || "توضیحی ثبت نشده است."}</p><div className="chip-list">{product.variants.map((variant) => <span key={variant.id}>{variant.sku} · {variant.name}</span>)}{!product.variants.length && <span>هنوز مدلی ندارد</span>}</div><div className="entity-card-actions"><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setVariantProduct(product); }}><PackagePlus size={15} /> افزودن مدل</button><button className="secondary-button" type="button" onClick={() => { setFormState(initialFormState); setImageProduct(product); }}><ImagePlus size={15} /> {product.images.length ? "تغییر تصویر" : "افزودن تصویر"}</button></div></article>)}</div> : <EmptyState title="محصولی یافت نشد" description="محصول و تصویر آن را ثبت کن تا در انبار و سفارش قابل استفاده باشد." />}
     <Modal open={createOpen} title="ثبت محصول" description="تصویر JPG، PNG یا WebP تا ۵ مگابایت الزامی است." onClose={closeCreate}><form className="entity-form" onSubmit={submitProduct}><FormField label="نام محصول"><input name="name" required /></FormField><FormField label="شناسه لاتین" hint="مثلاً gold-ring-001"><input name="slug" dir="ltr" required /></FormField><FormField label="دسته‌بندی"><select name="categoryId"><option value="">بدون دسته</option>{data.categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></FormField><FormField label="تصویر محصول" wide><input name="image" type="file" accept="image/jpeg,image/png,image/webp" required /></FormField><FormField label="توضیحات" wide><textarea name="description" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت محصول و تصویر" onCancel={closeCreate} /></form></Modal>
@@ -912,6 +957,7 @@ function InventoryPage({ path, onNavigate, onNotice }: RouteProps) {
   const [receiptOpen, setReceiptOpen] = useState(queryFlag(path, "receipt"));
   const [searchTerm, setSearchTerm] = useState("");
   const [formState, setFormState] = useState<FormState>(initialFormState);
+  useInventoryScanner({ setSearchTerm, onNotice });
   const variants = useMemo(() => data.products.flatMap((product) => product.variants.map((variant) => ({ ...variant, productName: product.name }))), [data.products]);
   const latestPurchases = useMemo(() => {
     const byVariant = new Map<string, SupplierPurchase>();
@@ -952,19 +998,57 @@ function OrdersPage(props: RouteProps) {
     ? data.orders.filter((order) => order.customerId === requestedCustomerId)
     : data.orders;
   const [settleOrder, setSettleOrder] = useState<Order | null>(queryFlag(props.path, "settle") ? data.orders.find((item) => !["Paid", "Completed", "Cancelled"].includes(item.status)) || null : null);
-  const [formState, setFormState] = useState<FormState>(initialFormState);
+  const [formState, setFormState] = useState<FormState>(initialFormState);
+  const [installmentOrder, setInstallmentOrder] = useState<Order | null>(null);
+  const [trustFundOrder, setTrustFundOrder] = useState<Order | null>(null);
   useEffect(() => {
     if (!queryFlag(props.path, "settle") || settleOrder || !data.orders.length) return;
     setSettleOrder(data.orders.find((item) => !["Paid", "Completed", "Cancelled", "Refunded"].includes(item.status)) || null);
   }, [data.orders, props.path, settleOrder]);
   const closeSettlement = () => { setFormState(initialFormState); setSettleOrder(null); if (queryFlag(props.path, "settle")) props.onNavigate("/orders"); };
-  const submitPayment = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!settleOrder) return; const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { const payment = await request<Payment>("/api/v1/payments/manual", { method: "POST", headers: { "Idempotency-Key": createIdempotencyKey("manual-payment") }, body: JSON.stringify({ orderId: settleOrder.id, method: textValue(form, "method"), reference: optionalText(form, "reference") }) }); setSettleOrder(null); setFormState(initialFormState); await refresh(); if (payment.invoiceId) { props.onNotice("پرداخت تأیید و فاکتور صادر شد؛ پیش‌نمایش فاکتور باز شد."); props.onNavigate(`/invoices?open=${payment.invoiceId}`); } else { props.onNotice("پرداخت ثبت شد."); props.onNavigate("/orders"); } } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
+  const submitPayment = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!settleOrder) return; const form = new FormData(event.currentTarget);
+    const selectedPaymentMethod = textValue(form, "method");
+    if (selectedPaymentMethod === "Installment") {
+      setInstallmentOrder(settleOrder);
+      setSettleOrder(null);
+      setFormState(initialFormState);
+      return;
+    }
+    if (selectedPaymentMethod === "TrustFund") {
+      setTrustFundOrder(settleOrder);
+      setSettleOrder(null);
+      setFormState(initialFormState);
+      return;
+    }setFormState({ saving: true, error: null }); try { const payment = await request<Payment>("/api/v1/payments/manual", { method: "POST", headers: { "Idempotency-Key": createIdempotencyKey("manual-payment") }, body: JSON.stringify({ orderId: settleOrder.id, method: textValue(form, "method"), reference: optionalText(form, "reference") }) }); setSettleOrder(null); setFormState(initialFormState); await refresh(); if (payment.invoiceId) { props.onNotice("پرداخت تأیید و فاکتور صادر شد؛ پیش‌نمایش فاکتور باز شد."); props.onNavigate(`/invoices?open=${payment.invoiceId}`); } else { props.onNotice("پرداخت ثبت شد."); props.onNavigate("/orders"); } } catch (error) { setFormState({ saving: false, error: messageOf(error) }); } };
   return <ModuleBody><PageHeader icon={ShoppingBag} title="سفارش‌ها" description="سفارش، رزرو موجودی، پرداخت و صدور فاکتور در یک گردش‌کار." actionLabel="سفارش جدید" onAction={() => props.onNavigate(requestedCustomerId ? `/orders/new?customerId=${requestedCustomerId}` : "/orders/new")} secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice />
     {requestedCustomerId && <div className="reference-active-filter">سفارش‌های {data.customers.find((customer) => customer.id === requestedCustomerId)?.displayName || "مشتری"}<button type="button" onClick={() => props.onNavigate("/orders")}>نمایش همه</button></div>}
     <div className="module-metrics-grid"><MetricTile label="کل سفارش‌ها" value={String(visibleOrders.length)} hint="همه وضعیت‌ها" /><MetricTile label="در انتظار پرداخت" value={String(visibleOrders.filter((item) => ["Pending","AwaitingPayment","PaymentReview"].includes(item.status)).length)} hint="نیازمند اقدام" /><MetricTile label="فروش سفارش‌ها" value={formatMoney(visibleOrders.filter((item) => item.status !== "Cancelled").reduce((sum, item) => sum + item.grandTotalRials, 0))} hint="غیرلغوشده" /></div>
     {visibleOrders.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شماره</th><th>مشتری</th><th>اقلام</th><th>مبلغ</th><th>وضعیت</th><th /></tr></thead><tbody>{visibleOrders.map((order) => <tr key={order.id}><td>{order.orderNumber}</td><td>{order.customerNameSnapshot || "مشتری"}</td><td>{order.items.length}</td><td>{formatMoney(order.grandTotalRials)}</td><td><StatusBadge status={order.status} /></td><td>{!["Paid","Completed","Cancelled","Refunded"].includes(order.status) && <button className="row-action" type="button" onClick={() => { setFormState(initialFormState); setSettleOrder(order); }}>ثبت پرداخت</button>}</td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="سفارشی ثبت نشده" description="سفارش جدید، موجودی را رزرو می‌کند و بعد از تسویه فاکتور صادر می‌شود." />}
-    <Modal open={Boolean(settleOrder)} title={`تسویه ${settleOrder?.orderNumber || "سفارش"}`} description={settleOrder ? `مبلغ قابل پرداخت: ${formatMoney(settleOrder.grandTotalRials)}` : undefined} onClose={closeSettlement}><form className="entity-form" onSubmit={submitPayment}><FormField label="روش پرداخت"><select name="method"><option value="Cash">نقدی</option><option value="PointOfSale">کارت‌خوان</option><option value="BankTransfer">حواله بانکی</option><option value="CardToCard">کارت‌به‌کارت</option></select></FormField><FormField label="شماره پیگیری"><input name="reference" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت پرداخت و صدور فاکتور" onCancel={closeSettlement} /></form></Modal>
-  </ModuleBody>;
+    <Modal open={Boolean(settleOrder)} title={`تسویه ${settleOrder?.orderNumber || "سفارش"}`} description={settleOrder ? `مبلغ قابل پرداخت: ${formatMoney(settleOrder.grandTotalRials)}` : undefined} onClose={closeSettlement}><form className="entity-form" onSubmit={submitPayment}><FormField label="روش پرداخت"><select name="method"><option value="Cash">نقدی</option><option value="PointOfSale">کارت‌خوان</option><option value="BankTransfer">حواله بانکی</option><option value="CardToCard">کارت‌به‌کارت</option><option value="Installment">اقساطی</option><option value="TrustFund">وجه امانی</option></select></FormField><FormField label="شماره پیگیری"><input name="reference" /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ادامه / ثبت پرداخت" onCancel={closeSettlement} /></form></Modal>
+      <InstallmentSetupModal
+      order={installmentOrder}
+      onClose={() => setInstallmentOrder(null)}
+      onCreated={async (plan: InstallmentPlan) => {
+        setInstallmentOrder(null);
+        await refresh();
+        props.onNotice("جدول اقساط ثبت شد؛ سفارش تا پرداخت آخرین قسط باز می‌ماند.");
+        props.onNavigate(`/accounting/installments?open=${plan.id}`);
+      }}
+    />
+    <TrustFundPaymentModal
+      order={trustFundOrder}
+      onClose={() => setTrustFundOrder(null)}
+      onCompleted={async (result: TrustFundAllocationResult) => {
+        setTrustFundOrder(null);
+        await refresh();
+        props.onNotice("وجه امانی تخصیص داده شد و سفارش تسویه شد.");
+        if (result.invoiceId) {
+          props.onNavigate(`/invoices?open=${result.invoiceId}`);
+        } else {
+          props.onNavigate("/orders");
+        }
+      }}
+    /></ModuleBody>;
 }
 
 function NewOrderPage({ path, onNavigate, onNotice }: RouteProps) {
@@ -1054,13 +1138,13 @@ function NewOrderPage({ path, onNavigate, onNotice }: RouteProps) {
   </ModuleBody>;
 }
 
-function AccountingPage() {
+function AccountingPage({ onNavigate }: RouteProps) {
   const { data, refresh, refreshing } = useOperations();
   const verified = data.payments.filter((item) => item.status === "Verified");
   const total = verified.reduce((sum, item) => sum + item.amountRials, 0);
   const outstanding = data.orders.filter((item) => !["Paid","Completed","Cancelled","Refunded"].includes(item.status)).reduce((sum, item) => sum + item.grandTotalRials, 0);
-  return <ModuleBody><PageHeader icon={Calculator} title="حسابداری" description="پرداخت‌های واقعی، وجوه وصول‌شده و مانده سفارش‌ها." secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="دریافت تأییدشده" value={formatMoney(total)} hint={`${verified.length} پرداخت`} /><MetricTile label="مطالبات سفارش‌ها" value={formatMoney(outstanding)} hint="تسویه‌نشده" /><MetricTile label="پرداخت نیازمند بررسی" value={String(data.payments.filter((item) => item.status === "RequiresReview").length)} hint="پیگیری مالی" /></div>
-    {data.payments.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شناسه</th><th>سفارش</th><th>روش</th><th>مبلغ</th><th>زمان تأیید</th><th>وضعیت</th></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td className="numeric-cell">{payment.id.slice(0,8)}</td><td>{data.orders.find((item) => item.id === payment.orderId)?.orderNumber || payment.orderId.slice(0,8)}</td><td>{translateStatus(payment.method)}</td><td>{formatMoney(payment.amountRials)}</td><td>{formatDate(payment.verifiedAt)}</td><td><StatusBadge status={payment.status} /></td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="تراکنشی ثبت نشده" description="پرداخت‌های نقدی، کارت‌خوان و درگاه پس از ثبت اینجا دیده می‌شوند." />}
+  return <ModuleBody><PageHeader icon={Calculator} title="حسابداری" description="پرداخت‌های واقعی، وجوه وصول‌شده و مانده سفارش‌ها." secondary={<RefreshButton refreshing={refreshing} onClick={() => void refresh()} />} /><AccountingQuickLinks onNavigate={onNavigate} /><DataNotice /><div className="module-metrics-grid"><MetricTile label="دریافت تأییدشده" value={formatMoney(total)} hint={`${verified.length} پرداخت`} /><MetricTile label="مطالبات سفارش‌ها" value={formatMoney(outstanding)} hint="تسویه‌نشده" /><MetricTile label="پرداخت نیازمند بررسی" value={String(data.payments.filter((item) => item.status === "RequiresReview").length)} hint="پیگیری مالی" /></div>
+    {data.payments.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>شناسه</th><th>سفارش</th><th>روش</th><th>مبلغ</th><th>زمان تأیید</th><th>وضعیت</th></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td className="numeric-cell">{payment.id.slice(0,8)}</td><td>{data.orders.find((item) => item.id === payment.orderId)?.orderNumber || payment.orderId.slice(0,8)}</td><td>{payment.gatewayPaymentId?.startsWith("INSTALLMENT-") ? "اقساطی" : payment.gatewayPaymentId?.startsWith("TRUSTFUND-") ? "وجه امانی" : translateStatus(payment.method)}</td><td>{formatMoney(payment.amountRials)}</td><td>{formatDate(payment.verifiedAt)}</td><td><StatusBadge status={payment.status} /></td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="تراکنشی ثبت نشده" description="پرداخت‌های نقدی، کارت‌خوان و درگاه پس از ثبت اینجا دیده می‌شوند." />}
   </ModuleBody>;
 }
 
@@ -1144,43 +1228,180 @@ function ReportsPage({ path, onNavigate }: RouteProps) {
   return <ModuleBody><EmptyState title="گزارش پیدا نشد" description="یکی از کارت‌های گزارش را انتخاب کن." /></ModuleBody>;
 }
 
-function EmployeesPage({ path, onNavigate, onNotice }: RouteProps) {
-  const { data, request, refresh, refreshing } = useOperations(); const [open, setOpen] = useState(false); const [formState, setFormState] = useState<FormState>(initialFormState);
-  const close = () => { setFormState(initialFormState); setOpen(false); };
-  const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setFormState({ saving: true, error: null }); try { await request<Person>("/api/v1/people/employees", { method: "POST", body: JSON.stringify({ displayName: textValue(form,"displayName"), email: textValue(form,"email"), phoneNumber: optionalText(form,"phoneNumber"), temporaryPassword: textValue(form,"temporaryPassword") }) }); onNotice("کارمند مدیر ثبت شد؛ در اولین ورود باید MFA را فعال کند."); close(); await refresh(); } catch (error) { setFormState({ saving:false,error:messageOf(error) }); } };
-  const employeeRoute = routeBase(path);
-  if (employeeRoute === "/employees") {
-    return <ModuleBody>
-      <ReferencePageHeader eyebrow="منابع انسانی" title="کارکنان" description="کارکنان بوتیک، هنرمندان آتلیه و پورسانت‌های آن‌ها." />
-      <DataNotice />
-      <div className="reference-feature-grid reference-feature-grid--three">
-        <FeatureNavigationCard title="فهرست کارکنان" description="مشاوران بوتیک، گوهرشناسان، حکاکان و کارکنان پشتیبانی." meta={`${data.employees.length} حساب کاربری`} onClick={() => onNavigate("/employees/list")} />
-        <FeatureNavigationCard title="پورسانت‌ها" description="پورسانت مشاوران بابت فاکتورهای تسویه‌شده، پرداخت ماهانه." meta={`${data.invoices.filter((invoice) => invoice.status !== "Voided").length} فاکتور`} onClick={() => onNavigate("/employees/commissions")} />
-        <FeatureNavigationCard title="برنامه کاری" description="شیفت‌ها، نوبت‌کاری آتلیه و تقویم مرخصی." meta={`${data.employees.filter((employee) => employee.isActive).length} کارمند فعال`} onClick={() => onNavigate("/employees/schedule")} />
-      </div>
-    </ModuleBody>;
-  }
-  if (employeeRoute === "/employees/commissions") {
-    const settledSales = data.invoices.filter((invoice) => invoice.status !== "Voided").reduce((sum, invoice) => sum + invoice.grandTotalRials, 0);
-    return <ModuleBody>
-      <ReferencePageHeader eyebrow="منابع انسانی" title="پورسانت‌ها" description="پورسانت مشاوران بابت فاکتورهای تسویه‌شده و وضعیت پرداخت ماهانه." secondary={<button className="secondary-button" type="button" onClick={() => onNavigate("/employees")}>بازگشت</button>} />
-      <DataNotice />
-      <div className="module-metrics-grid"><MetricTile label="کارکنان فعال" value={String(data.employees.filter((employee) => employee.isActive).length)} hint="حساب بک‌اند" /><MetricTile label="فروش تسویه‌شده" value={formatMoney(settledSales)} hint="بدون انتساب کارمند" /></div>
-      <div className="inline-help">بک‌اند فعلی هنوز شناسه فروشنده را روی فاکتور ذخیره نمی‌کند؛ بنابراین پورسانت ساختگی محاسبه نشده و تا زمان اضافه‌شدن این ارتباط با «—» نمایش داده می‌شود.</div>
-      {data.employees.length ? <TableCard><div className="table-scroll"><table className="data-table"><thead><tr><th>کارمند</th><th>نقش</th><th>فاکتور منتسب</th><th>فروش منتسب</th><th>پورسانت</th><th>وضعیت</th></tr></thead><tbody>{data.employees.map((employee) => <tr key={employee.id}><td><strong>{employee.displayName}</strong><small>{employee.email || employee.phoneNumber || "—"}</small></td><td>{employee.roles.map(translateStatus).join("، ")}</td><td>—</td><td>—</td><td>—</td><td><StatusBadge status={employee.isActive ? "Active" : "Inactive"} /></td></tr>)}</tbody></table></div></TableCard> : <EmptyState title="کارمندی یافت نشد" description="پس از ثبت کارمند، حساب واقعی او در این گزارش دیده می‌شود." />}
-    </ModuleBody>;
-  }
-  if (employeeRoute === "/employees/schedule") {
-    return <ModuleBody>
-      <ReferencePageHeader eyebrow="منابع انسانی" title="برنامه کاری" description="وضعیت حضور سیستمی، نقش و آخرین فعالیت کارکنان ثبت‌شده." secondary={<button className="secondary-button" type="button" onClick={() => onNavigate("/employees")}>بازگشت</button>} />
-      <DataNotice />
-      <div className="inline-help">مدل شیفت و مرخصی هنوز در بک‌اند تعریف نشده است؛ این صفحه فقط وضعیت واقعی حساب‌ها و آخرین فعالیت را نشان می‌دهد.</div>
-      {data.employees.length ? <div className="reference-employee-grid">{data.employees.map((employee) => <article className="lux-card reference-roster-card" key={employee.id}><span className="large-avatar">{initialsOf(employee.displayName)}</span><div><h2>{employee.displayName}</h2><p>{employee.roles.map(translateStatus).join("، ") || "کارمند"}</p><small>آخرین فعالیت: {formatDate(employee.lastActivityAt)}</small></div><StatusBadge status={employee.isActive ? "Active" : "Inactive"} /></article>)}</div> : <EmptyState title="برنامه‌ای برای نمایش وجود ندارد" description="ابتدا حساب کارکنان را از فهرست کارکنان ثبت کن." />}
-    </ModuleBody>;
-  }
-  return <ModuleBody><ReferencePageHeader eyebrow="منابع انسانی" title="فهرست کارکنان" description="مشاوران بوتیک، گوهرشناسان، حکاکان و کارکنان پشتیبانی." actionLabel="مدیر جدید" onAction={() => { setFormState(initialFormState); setOpen(true); }} secondary={<><button className="secondary-button" type="button" onClick={() => onNavigate("/employees")}>بازگشت</button><RefreshButton refreshing={refreshing} onClick={() => void refresh()} /></>} /><DataNotice />{data.employees.length ? <div className="reference-employee-grid">{data.employees.map((employee) => <article className="lux-card person-card" key={employee.id}><span className="large-avatar">{initialsOf(employee.displayName)}</span><div><h3>{employee.displayName}</h3><p>{employee.email}</p><div className="chip-list">{employee.roles.map((role) => <span key={role}>{translateStatus(role)}</span>)}<span>{employee.mfaEnabled ? "MFA فعال" : "MFA در انتظار"}</span></div></div><StatusBadge status={employee.isActive ? "Active" : "Inactive"} /></article>)}</div> : <EmptyState title="کارمندی یافت نشد" description="حساب مالک فعلی باید دست‌کم در این لیست نمایش داده شود." />}<Modal open={open} title="ثبت مدیر جدید" description="حساب مدیر ملزم به فعال‌سازی MFA است." onClose={close}><form className="entity-form" onSubmit={submit}><FormField label="نام کامل"><input name="displayName" required /></FormField><FormField label="ایمیل"><input name="email" type="email" required /></FormField><FormField label="تلفن"><input name="phoneNumber" /></FormField><FormField label="رمز موقت"><input name="temporaryPassword" type="password" minLength={12} required /></FormField><InlineError message={formState.error} /><FormActions saving={formState.saving} submitLabel="ثبت مدیر" onCancel={close} /></form></Modal></ModuleBody>;
-}
+function EmployeesPage({ onNotice }: RouteProps) {
+  const { data, request, refresh, refreshing } = useOperations();
+  const { user } = useAuthentication();
+  const [open, setOpen] = useState(false);
+  const [formState, setFormState] = useState<FormState>(initialFormState);
+  const canManageEmployees = user?.permissions.includes("Admins.Manage") === true;
 
+  const close = () => {
+    setFormState(initialFormState);
+    setOpen(false);
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setFormState({ saving: true, error: null });
+
+    try {
+      const roleName = textValue(form, "roleName");
+      await request<Person>("/api/v1/people/employees", {
+        method: "POST",
+        body: JSON.stringify({
+          displayName: textValue(form, "displayName"),
+          email: textValue(form, "email"),
+          phoneNumber: textValue(form, "phoneNumber"),
+          temporaryPassword: textValue(form, "temporaryPassword"),
+          roleName,
+        }),
+      });
+
+      onNotice(
+        roleName === "Admin"
+          ? "مدیر جدید ثبت شد؛ ورود او با شماره موبایل و بدون Authenticator است."
+          : "کارمند جدید ثبت شد؛ ورود او با شماره موبایل و بدون Authenticator است.",
+      );
+      close();
+      await refresh();
+    } catch (error) {
+      setFormState({
+        saving: false,
+        error: messageOf(error),
+      });
+    }
+  };
+
+  return (
+    <ModuleBody>
+      <PageHeader
+        icon={IdCard}
+        title="کارکنان"
+        description="حساب‌های مالک، مدیران و کارکنان مجموعه."
+        actionLabel={canManageEmployees ? "اضافه کردن کارمند جدید" : undefined}
+        onAction={
+          canManageEmployees
+            ? () => {
+                setFormState(initialFormState);
+                setOpen(true);
+              }
+            : undefined
+        }
+        secondary={
+          <RefreshButton
+            refreshing={refreshing}
+            onClick={() => void refresh()}
+          />
+        }
+      />
+
+      <DataNotice />
+
+      {data.employees.length ? (
+        <div className="reference-employee-grid">
+          {data.employees.map((employee) => {
+            const isOwner = employee.roles.includes("Owner");
+            return (
+              <article className="lux-card person-card" key={employee.id}>
+                <span className="large-avatar">
+                  {employee.displayName.slice(0, 1)}
+                </span>
+                <div>
+                  <h3>{employee.displayName}</h3>
+                  <p dir="ltr">
+                    {isOwner
+                      ? employee.email || "—"
+                      : employee.phoneNumber || "شماره موبایل ثبت نشده"}
+                  </p>
+                  <div className="chip-list">
+                    {employee.roles.map((role) => (
+                      <span key={role}>{translateStatus(role)}</span>
+                    ))}
+                    <span>
+                      {isOwner
+                        ? employee.mfaEnabled
+                          ? "MFA فعال"
+                          : "MFA در انتظار"
+                        : "ورود با موبایل · بدون Authenticator"}
+                    </span>
+                  </div>
+                </div>
+                <StatusBadge
+                  status={employee.isActive ? "Active" : "Inactive"}
+                />
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          title="کارمندی یافت نشد"
+          description="حساب مالک فعلی باید دست‌کم در این لیست نمایش داده شود."
+        />
+      )}
+
+      <Modal
+        open={open}
+        title="اضافه کردن کارمند جدید"
+        description="نقش را انتخاب کن. مدیر و کارمند با شماره موبایل و رمز وارد می‌شوند؛ Authenticator فقط برای مالک است."
+        onClose={close}
+      >
+        <form className="entity-form" onSubmit={submit}>
+          <FormField label="نام کامل">
+            <input name="displayName" maxLength={200} required />
+          </FormField>
+
+          <FormField label="نقش">
+            <select name="roleName" defaultValue="Employee" required>
+              <option value="Admin">مدیر</option>
+              <option value="Employee">کارمند</option>
+            </select>
+          </FormField>
+
+          <FormField label="شماره موبایل">
+            <input
+              name="phoneNumber"
+              type="tel"
+              inputMode="tel"
+              dir="ltr"
+              minLength={7}
+              maxLength={32}
+              required
+            />
+          </FormField>
+
+          <FormField label="ایمیل تماس">
+            <input
+              name="email"
+              type="email"
+              dir="ltr"
+              maxLength={256}
+              required
+            />
+          </FormField>
+
+          <FormField label="رمز موقت">
+            <input
+              name="temporaryPassword"
+              type="password"
+              minLength={12}
+              maxLength={128}
+              required
+            />
+          </FormField>
+
+          <InlineError message={formState.error} />
+          <FormActions
+            saving={formState.saving}
+            submitLabel="ثبت کارمند"
+            onCancel={close}
+          />
+        </form>
+      </Modal>
+    </ModuleBody>
+  );
+}
 function SuppliersPage({ path, onNavigate, onNotice }: RouteProps) {
   const { data, request, refresh, refreshing } = useOperations();
   const [open, setOpen] = useState(false);
@@ -1285,11 +1506,14 @@ export function OperationsRouter(props: RouteProps) {
   if(base.startsWith("/inventory"))return <InventoryPage {...props}/>;
   if(base.startsWith("/orders/new"))return <NewOrderPage {...props}/>;
   if(base.startsWith("/orders"))return <OrdersPage {...props}/>;
-  if(base.startsWith("/accounting"))return <AccountingPage/>;
+  if(base.startsWith("/accounting/installments"))return <InstallmentsPage {...props}/>;
+  if(base.startsWith("/accounting/trust-funds"))return <TrustFundsPage {...props}/>;
+  if(base.startsWith("/accounting/bank-interest"))return <BankInterestPage {...props}/>;
+  if(base.startsWith("/accounting"))return <AccountingPage {...props}/>;
   if(base.startsWith("/reports"))return <ReportsPage {...props}/>;
   if(base.startsWith("/employees"))return <EmployeesPage {...props}/>;
-  if(base.startsWith("/suppliers"))return <SupplierPurchasesPage {...props}/>;
-  if(base.startsWith("/crm"))return <CrmPage {...props}/>;
+  if(base.startsWith("/suppliers"))return <ModuleBody><SupplierPurchasesPage {...props}/></ModuleBody>;
+    if(base.startsWith("/financial-workspace"))return <FinancialWorkspacePage onNotice={props.onNotice}/>;
   if(base.startsWith("/settings"))return <SettingsPage {...props}/>;
   if(base.startsWith("/profile"))return <ManagerProfilePage {...props}/>;
   if(base.startsWith("/search"))return <SearchPage {...props}/>;
