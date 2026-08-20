@@ -62,9 +62,19 @@ builder.Services.AddApiFoundation(builder.Configuration);
 builder.Services.AddApiSecurity(builder.Configuration);
 builder.Services.AddOutboxProcessing();
 
+// Trusted-proxy forwarding is opt-in through the "ForwardedHeaders"
+// configuration section. When the section is absent (direct LocalDB/desktop
+// deployments) the ForwardedHeaders enum is None and the middleware is a
+// no-op, so X-Forwarded-* headers from arbitrary clients are never trusted.
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(
+    builder.Configuration.GetSection("ForwardedHeaders"));
+
 var app = builder.Build();
 var apiOptions = app.Services.GetRequiredService<IOptions<ApiHostOptions>>().Value;
 
+// Must run before any middleware that depends on the caller's address, so
+// the rate limiter and audit logs see the proxy-reported client address.
+app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseExceptionHandler();

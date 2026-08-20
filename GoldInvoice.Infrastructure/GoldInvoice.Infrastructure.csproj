@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="GoldInvoice.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\GoldInvoice.Application\GoldInvoice.Application.csproj" />
     <ProjectReference Include="..\GoldInvoice.Contracts\GoldInvoice.Contracts.csproj" />
     <ProjectReference Include="..\GoldInvoice.Domain\GoldInvoice.Domain.csproj" />

@@ -257,6 +257,15 @@ internal sealed class SecurityBootstrapHostedService(
         var employees =
             await userManager.GetUsersInRoleAsync(SecurityRoles.Employee);
 
+        var adminIds = admins
+            .Select(user => user.Id)
+            .ToHashSet();
+
+        // All staff get their contact identifiers normalized. Admins are a
+        // privileged role whose sessions require MFA (the access-token
+        // validator rejects non-MFA tokens for them), so their MFA state must
+        // survive every startup. Only employees are force-cleared; they sign
+        // in from the sales floor without MFA.
         var staff = admins
             .Concat(employees)
             .GroupBy(user => user.Id)
@@ -268,19 +277,22 @@ internal sealed class SecurityBootstrapHostedService(
             cancellationToken.ThrowIfCancellationRequested();
             var changed = false;
 
-            if (user.MfaRequired)
+            if (!adminIds.Contains(user.Id))
             {
-                user.ClearMfaRequirement();
-                changed = true;
-            }
+                if (user.MfaRequired)
+                {
+                    user.ClearMfaRequirement();
+                    changed = true;
+                }
 
-            if (user.TwoFactorEnabled)
-            {
-                ThrowIfFailed(
-                    await userManager.SetTwoFactorEnabledAsync(
-                        user,
-                        false),
-                    "Two-factor authentication could not be disabled for staff.");
+                if (user.TwoFactorEnabled)
+                {
+                    ThrowIfFailed(
+                        await userManager.SetTwoFactorEnabledAsync(
+                            user,
+                            false),
+                        "Two-factor authentication could not be disabled for staff.");
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(user.PhoneNumber))

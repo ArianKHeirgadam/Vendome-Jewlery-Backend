@@ -582,10 +582,18 @@ internal sealed class FlexiblePaymentService(
             throw new ApplicationResourceNotFoundException();
         }
 
+        // The balance check for a Release and the entry insert must be one
+        // atomic unit so two concurrent releases cannot both pass the balance
+        // check and overspend the account.
+        await using var transaction =
+            await PersistenceUtilities.BeginSerializableTransactionAsync(
+                dbContext,
+                cancellationToken);
+
         if (entryType == "Release")
         {
             var currentBalance = CalculateBalance(
-                (await LoadTrustEntriesAsync(cancellationToken))
+                (await LoadTrustEntriesForUpdateAsync(cancellationToken))
                     .Where(item => item.CustomerId == command.CustomerId));
 
             if (currentBalance < command.AmountRials)
@@ -609,7 +617,8 @@ internal sealed class FlexiblePaymentService(
             TrustDataType,
             entry));
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+        await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
         return MapTrustEntry(entry);
     }
 
@@ -625,9 +634,19 @@ internal sealed class FlexiblePaymentService(
             throw new ArgumentException("A valid order is required.", nameof(command));
         }
 
-        var order = await dbContext.Orders
-            .AsNoTracking()
-            .SingleOrDefaultAsync(item => item.Id == command.OrderId, cancellationToken)
+        // The balance check, the per-order allocation de-duplication, and the
+        // payment that spends the balance must be one atomic unit. Without a
+        // transaction two concurrent allocations could both read the same
+        // balance and overspend it across different orders. The serializable
+        // transaction plus the tracked reads serialize concurrent allocations
+        // for the same customer; the second one re-reads after the first
+        // commits and conflicts.
+        await using var transaction =
+            await PersistenceUtilities.BeginSerializableTransactionAsync(
+                dbContext,
+                cancellationToken);
+
+        var order = await dbContext.Orders.FindAsync([command.OrderId], cancellationToken)
             ?? throw new ApplicationResourceNotFoundException();
 
         if (order.Status != OrderStatus.AwaitingPayment)
@@ -635,7 +654,7 @@ internal sealed class FlexiblePaymentService(
             throw new ApplicationConflictException();
         }
 
-        var entries = await LoadTrustEntriesAsync(cancellationToken);
+        var entries = await LoadTrustEntriesForUpdateAsync(cancellationToken);
 
         var existingAllocation = entries.FirstOrDefault(item =>
             item.EntryType == "Allocation" &&
@@ -789,6 +808,23 @@ internal sealed class FlexiblePaymentService(
             .Select(setting => Deserialize<InstallmentLineDocument>(setting, LineDataType))
             .Where(item => item is not null)
             .Cast<InstallmentLineDocument>()
+            .ToList();
+    }
+
+    private async Task<List<TrustFundEntryDocument>> LoadTrustEntriesForUpdateAsync(
+        CancellationToken cancellationToken)
+    {
+        // Tracked read: when the caller has opened a serializable transaction
+        // the range predicate below takes range locks, which serializes
+        // concurrent allocations or releases for the same customer.
+        var settings = await dbContext.SystemSettings
+            .Where(setting => setting.Key.StartsWith(TrustPrefix))
+            .ToListAsync(cancellationToken);
+
+        return settings
+            .Select(setting => Deserialize<TrustFundEntryDocument>(setting, TrustDataType))
+            .Where(item => item is not null)
+            .Cast<TrustFundEntryDocument>()
             .ToList();
     }
 

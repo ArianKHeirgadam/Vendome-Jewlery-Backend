@@ -94,7 +94,7 @@ public static class ApiSecurityServiceCollectionExtensions
     {
         options.AddPolicy(policyName, httpContext =>
             RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                partitionKey: RateLimitPartitioning.ResolveKey(httpContext),
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = rule.PermitLimit,

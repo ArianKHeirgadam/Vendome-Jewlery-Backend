@@ -12,6 +12,7 @@ using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Persistence;
 using GoldInvoice.Infrastructure.Persistence.Interceptors;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -145,6 +146,110 @@ public sealed class AuthenticationFlowTests
                     recoveryCode,
                     storedValue,
                     StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Admin_MustEnrollMfaBeforeAccessTokenIsIssued()
+    {
+        await using var provider = CreateProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var admin = await CreatePhoneStaffAsync(scope.ServiceProvider, SecurityRoles.Admin);
+        var authentication = scope.ServiceProvider.GetRequiredService<IAccountAuthenticationService>();
+        var context = new RequestSecurityContext("127.0.0.1", "integration-test", null);
+
+        var signIn = await authentication.SignInAsync(
+            new SignInCommand("0912-777-0001", ValidPassword, null, null),
+            context,
+            CancellationToken.None);
+
+        Assert.Equal(SignInStatus.MfaEnrollmentRequired, signIn.Status);
+        Assert.Null(signIn.Tokens);
+        Assert.NotNull(signIn.MfaEnrollmentToken);
+
+        var setup = await authentication.StartMfaEnrollmentAsync(
+            signIn.MfaEnrollmentToken,
+            CancellationToken.None);
+        Assert.StartsWith("otpauth://totp/", setup.AuthenticatorUri, StringComparison.Ordinal);
+
+        var code = GenerateAuthenticatorCode(setup.SharedKey, DateTimeOffset.UtcNow);
+        var enabled = await authentication.CompleteMfaEnrollmentAsync(
+            setup.EnrollmentToken,
+            code,
+            context,
+            CancellationToken.None);
+
+        Assert.NotEmpty(enabled.Tokens.AccessToken);
+        Assert.Equal(10, enabled.RecoveryCodes.Count);
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        Assert.True((await userManager.FindByIdAsync(admin.Id.ToString("D")))?.TwoFactorEnabled);
+    }
+
+    [Fact]
+    public async Task Admin_AccessTokenPassesValidationAfterMfa()
+    {
+        await using var provider = CreateProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var context = new RequestSecurityContext("127.0.0.1", "integration-test", null);
+        var tokens = await EnrollAndSignInAsync(scope.ServiceProvider, SecurityRoles.Admin, context);
+        var principal = ValidateSignature(
+            tokens.AccessToken,
+            scope.ServiceProvider.GetRequiredService<IOptions<JwtOptions>>().Value);
+        var validator = scope.ServiceProvider.GetRequiredService<IAccessTokenPrincipalValidator>();
+
+        Assert.True(await validator.ValidateAndEnrichAsync(principal, CancellationToken.None));
+        Assert.Contains(principal.Claims, claim =>
+            claim.Type == SecurityClaimNames.Role && claim.Value == SecurityRoles.Admin);
+    }
+
+    [Fact]
+    public async Task SecurityBootstrap_DoesNotStripMfaFromAdminOrOwnerAdminUsers()
+    {
+        await using var provider = CreateProvider();
+        var bootstrapper = GetSecurityBootstrapper(provider);
+        await bootstrapper.StartAsync(CancellationToken.None);
+
+        await using var scope = provider.CreateAsyncScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = new ApplicationUser("Owner Admin User")
+        {
+            Email = $"owneradmin-{Guid.NewGuid():N}@example.test",
+            UserName = $"owneradmin-{Guid.NewGuid():N}@example.test",
+            EmailConfirmed = true
+        };
+        user.UserName = user.Email;
+        var createResult = await userManager.CreateAsync(user, ValidPassword);
+        Assert.True(createResult.Succeeded, string.Join(", ", createResult.Errors.Select(error => error.Code)));
+        await userManager.AddToRoleAsync(user, SecurityRoles.Owner);
+        await userManager.AddToRoleAsync(user, SecurityRoles.Admin);
+        Assert.True((await userManager.SetTwoFactorEnabledAsync(user, true)).Succeeded);
+
+        await bootstrapper.StartAsync(CancellationToken.None);
+        await bootstrapper.StartAsync(CancellationToken.None);
+
+        var reloaded = await userManager.FindByIdAsync(user.Id.ToString("D"));
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded.TwoFactorEnabled);
+    }
+
+    [Theory]
+    [InlineData("192.168.1.5", "192.168.1.5")]
+    [InlineData("::ffff:192.168.1.5", "192.168.1.5")]
+    [InlineData("::1", "::1")]
+    public void RateLimitPartitioning_ResolvesAStablePerClientKey(string address, string expected)
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(address);
+
+        Assert.Equal(expected, RateLimitPartitioning.ResolveKey(httpContext));
+    }
+
+    [Fact]
+    public void RateLimitPartitioning_FallsBackToSharedKeyWhenNoRemoteAddress()
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Connection.RemoteIpAddress = null;
+
+        Assert.Equal("unknown", RateLimitPartitioning.ResolveKey(httpContext));
     }
 
     [Fact]
@@ -365,6 +470,58 @@ public sealed class AuthenticationFlowTests
             user.RequireMfa();
         }
 
+        var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+        var createResult = await userManager.CreateAsync(user, ValidPassword);
+        Assert.True(createResult.Succeeded, string.Join(", ", createResult.Errors.Select(error => error.Code)));
+        var roleAssignment = await userManager.AddToRoleAsync(user, roleName);
+        Assert.True(roleAssignment.Succeeded);
+        return user;
+    }
+
+    private static async Task<TokenPair> EnrollAndSignInAsync(
+        IServiceProvider services,
+        string roleName,
+        RequestSecurityContext context)
+    {
+        var authentication = services.GetRequiredService<IAccountAuthenticationService>();
+        var user = await CreatePhoneStaffAsync(services, roleName);
+        var first = await authentication.SignInAsync(
+            new SignInCommand("0912-777-0001", ValidPassword, null, null),
+            context,
+            CancellationToken.None);
+        Assert.Equal(SignInStatus.MfaEnrollmentRequired, first.Status);
+        Assert.NotNull(first.MfaEnrollmentToken);
+
+        var setup = await authentication.StartMfaEnrollmentAsync(
+            first.MfaEnrollmentToken,
+            CancellationToken.None);
+        var code = GenerateAuthenticatorCode(setup.SharedKey, DateTimeOffset.UtcNow);
+        var enabled = await authentication.CompleteMfaEnrollmentAsync(
+            setup.EnrollmentToken,
+            code,
+            context,
+            CancellationToken.None);
+        return enabled.Tokens;
+    }
+
+    private static async Task<ApplicationUser> CreatePhoneStaffAsync(
+        IServiceProvider services,
+        string roleName)
+    {
+        var roleManager = services.GetRequiredService<RoleManager<ApplicationRole>>();
+        var roleResult = await roleManager.CreateAsync(new ApplicationRole(
+            roleName,
+            $"{roleName} test role",
+            isSystem: true));
+        Assert.True(roleResult.Succeeded);
+
+        var user = new ApplicationUser($"{roleName} Test User")
+        {
+            UserName = "09127770001",
+            NormalizedUserName = "09127770001",
+            PhoneNumber = "09127770001",
+            PhoneNumberConfirmed = true
+        };
         var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
         var createResult = await userManager.CreateAsync(user, ValidPassword);
         Assert.True(createResult.Succeeded, string.Join(", ", createResult.Errors.Select(error => error.Code)));

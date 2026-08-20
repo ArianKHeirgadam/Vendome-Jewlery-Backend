@@ -78,6 +78,209 @@ public sealed class PhaseFiveWorkflowTests
     }
 
     [Fact]
+    public async Task TrustFund_DepositThenAllocationPaysOrderAndIssuesInvoice()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var flexible = CreateFlexiblePayments(scenario);
+
+        await flexible.AddTrustFundEntryAsync(
+            new AddTrustFundEntryCommand(
+                scenario.Customer.Id,
+                scenario.Customer.Id,
+                "Deposit",
+                12_000_000,
+                OccurredAt: null,
+                Reference: "deposit-1"),
+            CancellationToken.None);
+
+        var snapshot = await flexible.GetTrustFundBalanceAsync(
+            scenario.Customer.Id,
+            CancellationToken.None);
+        Assert.Equal(12_000_000, snapshot.BalanceRials);
+
+        var allocation = await flexible.AllocateTrustFundAsync(
+            new AllocateTrustFundCommand(
+                scenario.Customer.Id,
+                scenario.Order.Id,
+                "allocation-1"),
+            CancellationToken.None);
+
+        Assert.Equal(12_000_000, allocation.AllocatedAmountRials);
+        Assert.Equal(0, allocation.RemainingBalanceRials);
+        Assert.NotNull(allocation.InvoiceId);
+        Assert.Equal(
+            OrderStatus.Paid,
+            (await scenario.Context.Orders.SingleAsync()).Status);
+        Assert.Single(await scenario.Context.Payments.ToListAsync());
+        Assert.Single(await scenario.Context.Invoices.ToListAsync());
+    }
+
+    [Fact]
+    public async Task TrustFund_AllocationRequiresSufficientBalance()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var flexible = CreateFlexiblePayments(scenario);
+
+        await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            flexible.AllocateTrustFundAsync(
+                new AllocateTrustFundCommand(
+                    scenario.Customer.Id,
+                    scenario.Order.Id,
+                    "allocation-without-deposit"),
+                CancellationToken.None));
+
+        Assert.Equal(
+            OrderStatus.AwaitingPayment,
+            (await scenario.Context.Orders.SingleAsync()).Status);
+        Assert.Empty(await scenario.Context.Payments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task TrustFund_ReleaseCannotExceedBalance()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var flexible = CreateFlexiblePayments(scenario);
+
+        await flexible.AddTrustFundEntryAsync(
+            new AddTrustFundEntryCommand(
+                scenario.Customer.Id,
+                scenario.Customer.Id,
+                "Deposit",
+                5_000_000,
+                OccurredAt: null,
+                Reference: "deposit-1"),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            flexible.AddTrustFundEntryAsync(
+                new AddTrustFundEntryCommand(
+                    scenario.Customer.Id,
+                    scenario.Customer.Id,
+                    "Release",
+                    6_000_000,
+                    OccurredAt: null,
+                    Reference: "release-over-balance"),
+                CancellationToken.None));
+
+        var snapshot = await flexible.GetTrustFundBalanceAsync(
+            scenario.Customer.Id,
+            CancellationToken.None);
+        Assert.Equal(5_000_000, snapshot.BalanceRials);
+    }
+
+    [Fact]
+    public async Task TrustFund_CannotOverspendAcrossTwoOrders()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var flexible = CreateFlexiblePayments(scenario);
+        var inventory = new InventoryService(
+            scenario.Context,
+            scenario.outboxWriter,
+            scenario.TimeProvider);
+        var secondItem = await inventory.ReceiveStockAsync(
+            new ReceiveStockCommand(
+                scenario.inventoryItem.WarehouseId,
+                scenario.inventoryItem.ProductVariantId,
+                1,
+                "Purchase",
+                Guid.NewGuid(),
+                null),
+            CancellationToken.None);
+        var secondOrder = await scenario.OrderService.CreateOrderAsync(
+            new CreateOrderCommand(
+                scenario.Customer.Id,
+                scenario.Customer.Id,
+                CanManageOrders: false,
+                scenario.Address.Id,
+                "0012345679",
+                [new CreateOrderLineCommand(
+                    secondItem.Id,
+                    InventoryUnitId: null,
+                    Quantity: 1,
+                    ActualGrossWeight: null,
+                    ActualNetGoldWeight: null,
+                    secondItem.RowVersion,
+                    InventoryUnitRowVersion: null)],
+                ReservationLifetimeMinutes: 15,
+                DiscountRials: 0,
+                ShippingRials: 0,
+                "order-idempotency-key-200"),
+            CancellationToken.None);
+
+        await flexible.AddTrustFundEntryAsync(
+            new AddTrustFundEntryCommand(
+                scenario.Customer.Id,
+                scenario.Customer.Id,
+                "Deposit",
+                12_000_000,
+                OccurredAt: null,
+                Reference: "deposit-1"),
+            CancellationToken.None);
+
+        await flexible.AllocateTrustFundAsync(
+            new AllocateTrustFundCommand(
+                scenario.Customer.Id,
+                scenario.Order.Id,
+                "allocation-1"),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            flexible.AllocateTrustFundAsync(
+                new AllocateTrustFundCommand(
+                    scenario.Customer.Id,
+                    secondOrder.Id,
+                    "allocation-2"),
+                CancellationToken.None));
+
+        Assert.Equal(
+            OrderStatus.AwaitingPayment,
+            (await scenario.Context.Orders.SingleAsync(order => order.Id == secondOrder.Id)).Status);
+    }
+
+    [Fact]
+    public async Task TrustFund_SecondAllocationForSameOrderConflicts()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var flexible = CreateFlexiblePayments(scenario);
+
+        await flexible.AddTrustFundEntryAsync(
+            new AddTrustFundEntryCommand(
+                scenario.Customer.Id,
+                scenario.Customer.Id,
+                "Deposit",
+                12_000_000,
+                OccurredAt: null,
+                Reference: "deposit-1"),
+            CancellationToken.None);
+        await flexible.AllocateTrustFundAsync(
+            new AllocateTrustFundCommand(
+                scenario.Customer.Id,
+                scenario.Order.Id,
+                "allocation-1"),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            flexible.AllocateTrustFundAsync(
+                new AllocateTrustFundCommand(
+                    scenario.Customer.Id,
+                    scenario.Order.Id,
+                    "allocation-2"),
+                CancellationToken.None));
+    }
+
+    private static FlexiblePaymentService CreateFlexiblePayments(Scenario scenario)
+    {
+        var paymentService = scenario.CreatePaymentService([]);
+        return new FlexiblePaymentService(
+            scenario.Context,
+            paymentService,
+            scenario.coordinator,
+            scenario.InvoiceService,
+            scenario.outboxWriter,
+            scenario.TimeProvider);
+    }
+
+    [Fact]
     public async Task PaidInvoice_AllowsAuditedDocumentCorrectionWithoutChangingFinancialSnapshot()
     {
         await using var scenario = await CreateScenarioAsync();
@@ -806,10 +1009,13 @@ public sealed class PhaseFiveWorkflowTests
         public GoldInvoiceDbContext Context { get; } = context;
         public ApplicationUser Customer { get; } = customer;
         public CustomerAddressInfo Address { get; } = address;
-        public OrderInfo Order { get; set; } = null!;
+        public InventoryItemInfo inventoryItem { get; } = inventoryItem;
         public OrderService OrderService { get; } = orderService;
+        public InventoryReservationCoordinator coordinator { get; } = coordinator;
         public InvoiceService InvoiceService { get; } = invoiceService;
+        public IOutboxWriter outboxWriter { get; } = outboxWriter;
         public TimeProvider TimeProvider { get; } = timeProvider;
+        public OrderInfo Order { get; set; } = null!;
 
         public CreateOrderCommand CreateOrderCommand(string idempotencyKey) => new(
             Customer.Id,

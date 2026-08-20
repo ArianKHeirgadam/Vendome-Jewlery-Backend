@@ -128,10 +128,11 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
         var isOwner = access.Roles.Contains(
             SecurityRoles.Owner,
             StringComparer.Ordinal);
+        var isAdmin = access.Roles.Contains(
+            SecurityRoles.Admin,
+            StringComparer.Ordinal);
         var isStaff =
-            access.Roles.Contains(
-                SecurityRoles.Admin,
-                StringComparer.Ordinal) ||
+            isAdmin ||
             access.Roles.Contains(
                 SecurityRoles.Employee,
                 StringComparer.Ordinal);
@@ -160,8 +161,10 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
             throw new AuthenticationRejectedException();
         }
 
-        // Authenticator/MFA belongs ONLY to the Owner.
-        var mfaRequired = isOwner;
+        // Authenticator/MFA belongs to the Owner and Admin roles. This must
+        // stay aligned with the access-token validator, which rejects tokens
+        // without an MFA authentication method for any privileged role.
+        var mfaRequired = isOwner || isAdmin;
 
         if (mfaRequired && !user.TwoFactorEnabled)
         {
@@ -599,7 +602,8 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
         }
 
         var access = await SecurityAccessQueries.ResolveAsync(dbContext, user.Id, cancellationToken);
-        var mustEnroll = access.Roles.Contains(SecurityRoles.Owner, StringComparer.Ordinal);
+        var mustEnroll = access.Roles.Contains(SecurityRoles.Owner, StringComparer.Ordinal) ||
+            access.Roles.Contains(SecurityRoles.Admin, StringComparer.Ordinal);
         if (!mustEnroll)
         {
             throw new AuthenticationRejectedException();
@@ -616,8 +620,10 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
         ApplicationUser user,
         SignInCommand command)
     {
-        if (!string.IsNullOrWhiteSpace(command.AuthenticatorCode) &&
-            string.IsNullOrWhiteSpace(command.RecoveryCode))
+        // When a client sends both codes, prefer the authenticator code.
+        // Treating "both supplied" as a failure would let an interop bug
+        // drive a privileged account toward lockout.
+        if (!string.IsNullOrWhiteSpace(command.AuthenticatorCode))
         {
             return await userManager.VerifyTwoFactorTokenAsync(
                 user,
@@ -625,8 +631,7 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
                 NormalizeAuthenticatorCode(command.AuthenticatorCode));
         }
 
-        if (!string.IsNullOrWhiteSpace(command.RecoveryCode) &&
-            string.IsNullOrWhiteSpace(command.AuthenticatorCode))
+        if (!string.IsNullOrWhiteSpace(command.RecoveryCode))
         {
             var result = await userManager.RedeemTwoFactorRecoveryCodeAsync(
                 user,
