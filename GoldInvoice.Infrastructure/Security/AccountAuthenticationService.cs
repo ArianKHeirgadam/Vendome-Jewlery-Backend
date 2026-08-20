@@ -135,13 +135,18 @@ internal sealed class AccountAuthenticationService : IAccountAuthenticationServi
             access.Roles.Contains(
                 SecurityRoles.Employee,
                 StringComparer.Ordinal);
+        var isCustomer = access.Roles.Contains(
+            SecurityRoles.Customer,
+            StringComparer.Ordinal);
 
         // Management desktop sign-in identifiers are role-specific:
         // Owner = email only. Non-owner staff = mobile only.
-        // Customer accounts are intentionally not management logins.
+        // Customer accounts are storefront logins and may use either
+        // their email or their phone number, whichever they registered with.
         var identifierAllowed =
             (isOwner && !isPhoneNumber) ||
-            (isStaff && isPhoneNumber);
+            (isStaff && isPhoneNumber) ||
+            isCustomer;
 
         if (!identifierAllowed)
         {

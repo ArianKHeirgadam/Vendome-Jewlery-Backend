@@ -233,7 +233,7 @@ public sealed class AuthenticationFlowTests
         await using var scope = provider.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<GoldInvoiceDbContext>();
         var ownerRole = await dbContext.Roles.SingleAsync(role => role.Name == SecurityRoles.Owner);
-        Assert.Equal(3, await dbContext.Roles.CountAsync());
+        Assert.Equal(SecurityRoles.All.Count, await dbContext.Roles.CountAsync());
         Assert.Equal(SecurityPermissions.All.Count, await dbContext.Permissions.CountAsync());
         Assert.Equal(
             SecurityPermissions.All.Count,
