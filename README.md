@@ -14,6 +14,7 @@
 - `VendomeJewleryDesktopApp`: full-screen WPF/WebView2 host for the shared React client.
 - `GoldInvoice.UnitTests`: Domain and Application tests.
 - `GoldInvoice.IntegrationTests`: API and infrastructure-boundary tests.
+- `GoldInvoice.PrintAgent`: Windows executable for device-bound printing (enroll/run).
 
 ## Phase 1 endpoints
 
@@ -118,6 +119,16 @@ orchestration. Device enrollment, printer discovery, and device-bound profiles
 remain Phase 7C-B. See
 [`docs/architecture/phase-7c-invoice-documents.md`](docs/architecture/phase-7c-invoice-documents.md).
 
+## Phase 7C-B device-bound printing
+
+* Secure Desktop‑device enrollment (short‑lived tokens, explicit approval, public‑key/thumbprint binding)
+* `DevicePrinter` and `PrintProfile` model
+* `InvoicePrintJob` with idempotency key, retry count, sanitized failure codes
+* Immutable one‑way `InvoicePrintLog` attempts
+* `GoldInvoice.PrintAgent` executable polls and prints signed jobs via hidden WebView2
+* Additive migration `20260820142605_AddPhase7CBDeviceBoundPrinting` applied
+* All 112 integration tests pass (including 9 PhaseSevenCB tests)
+
 ## Phase 8 supplier purchases, product images, and actual profit
 
 Supplier purchases now record quantity, unit acquisition cost, and the manual
@@ -155,7 +166,6 @@ Invoicing__SequenceSeries=DEFAULT
 Invoicing__SequencePrefix=INV
 Outbox__BatchSize=50
 Outbox__LockDurationSeconds=60
-Outbox__HeartbeatIntervalSeconds=20
 Worker__ReservationSweepIntervalSeconds=30
 ```
 
