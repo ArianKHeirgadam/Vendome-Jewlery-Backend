@@ -14,6 +14,7 @@ builder.Logging.AddJsonConsole(options =>
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddLocalRuntime(builder.Configuration);
 builder.Services
     .AddOptions<WorkerScheduleOptions>()
     .Bind(builder.Configuration.GetSection(WorkerScheduleOptions.SectionName))

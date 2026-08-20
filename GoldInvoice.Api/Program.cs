@@ -55,6 +55,7 @@ builder.Services.AddSwaggerGen(options =>
 });
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddLocalRuntime(builder.Configuration);
 builder.Services.AddSingleton<IMarketPriceProvider, NavasanMarketPriceProvider>();
 builder.Services.AddSingleton<IIntegrationEventHandler, SignalRIntegrationEventHandler>();
 builder.Services.AddSecurityInfrastructure(builder.Configuration);
