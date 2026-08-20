@@ -491,3 +491,10 @@ $RECYCLE.BIN/
 *.p12
 *.key
 *.pem
+
+# Root-level scratch/patch artifacts (belong in scripts/ or docs/, never committed loose at repo root)
+/*.patch
+
+# Only the shared GoldInvoice.Client build output is copied into the desktop app at build time;
+# never commit a checked-in ClientApp/src or ClientApp/dist under VendomeJewleryDesktopApp.
+VendomeJewleryDesktopApp/ClientApp/
