@@ -195,6 +195,9 @@ internal sealed class InvoicePrintLogConfiguration : IEntityTypeConfiguration<In
             table.HasCheckConstraint(
                 "CK_InvoicePrintLogs_Status",
                 "[Status] IN ('Requested', 'Succeeded', 'Failed')");
+            table.HasCheckConstraint(
+                "CK_InvoicePrintLogs_DeviceBinding",
+                "([PrintJobId] IS NULL AND [DesktopDeviceId] IS NULL) OR ([PrintJobId] IS NOT NULL AND [DesktopDeviceId] IS NOT NULL)");
         });
         builder.ConfigureAuditable();
         builder.Property(log => log.Status).ConfigureEnum();
@@ -204,6 +207,12 @@ internal sealed class InvoicePrintLogConfiguration : IEntityTypeConfiguration<In
         builder.Property(log => log.FailureCode).HasMaxLength(100).IsUnicode(false);
         builder.HasIndex(log => new { log.InvoiceId, log.CreatedAt });
         builder.HasIndex(log => new { log.DesktopDeviceId, log.Status, log.CreatedAt });
+        builder.HasIndex(log => log.PrintJobId)
+            .HasFilter("[PrintJobId] IS NOT NULL");
+        builder.HasOne<InvoicePrintJob>()
+            .WithMany()
+            .HasForeignKey(log => log.PrintJobId)
+            .OnDelete(DeleteBehavior.NoAction);
         builder.HasOne<Invoice>()
             .WithMany()
             .HasForeignKey(log => log.InvoiceId)
@@ -215,6 +224,57 @@ internal sealed class InvoicePrintLogConfiguration : IEntityTypeConfiguration<In
         builder.HasOne<ApplicationUser>()
             .WithMany()
             .HasForeignKey(log => log.RequestedByUserId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class InvoicePrintJobConfiguration : IEntityTypeConfiguration<InvoicePrintJob>
+{
+    public void Configure(EntityTypeBuilder<InvoicePrintJob> builder)
+    {
+        builder.ToTable("InvoicePrintJobs", DatabaseSchemas.Invoicing, table =>
+        {
+            table.HasCheckConstraint("CK_InvoicePrintJobs_Copies", "[Copies] > 0");
+            table.HasCheckConstraint("CK_InvoicePrintJobs_RetryCount", "[RetryCount] >= 0");
+            table.HasCheckConstraint(
+                "CK_InvoicePrintJobs_Status",
+                "[Status] IN ('Requested', 'Succeeded', 'Failed')");
+            table.HasCheckConstraint(
+                "CK_InvoicePrintJobs_Completion",
+                "([Status] = 'Requested' AND [CompletedAt] IS NULL AND [FailureCode] IS NULL AND [PrintedAtPrinterName] IS NULL AND [PrintedByAgentSignature] IS NULL) OR ([Status] = 'Succeeded' AND [CompletedAt] IS NOT NULL AND [PrintedAtPrinterName] IS NOT NULL AND [PrintedByAgentSignature] IS NOT NULL) OR ([Status] = 'Failed' AND [CompletedAt] IS NOT NULL AND [FailureCode] IS NOT NULL AND [PrintedAtPrinterName] IS NULL AND [PrintedByAgentSignature] IS NULL)");
+        });
+        builder.ConfigureAuditable();
+        builder.Property(job => job.Status).ConfigureEnum();
+        builder.Property(job => job.ReprintReason).HasMaxLength(1000);
+        builder.Property(job => job.IdempotencyKeyHash).HasMaxLength(128).IsUnicode(false);
+        builder.Property(job => job.CompletedAt).HasPrecision(7);
+        builder.Property(job => job.FailureCode).HasMaxLength(100).IsUnicode(false);
+        builder.Property(job => job.PrintedAtPrinterName).HasMaxLength(300);
+        builder.Property(job => job.PrintedByAgentSignature).HasMaxLength(512).IsUnicode(false);
+        builder.HasIndex(job => new { job.DesktopDeviceId, job.Status, job.CreatedAt });
+        builder.HasIndex(job => new { job.DesktopDeviceId, job.Status, job.IdempotencyKeyHash })
+            .IsUnique()
+            .HasFilter("[IdempotencyKeyHash] IS NOT NULL");
+        builder.HasIndex(job => new { job.InvoiceId, job.CreatedAt });
+        builder.HasOne<Invoice>()
+            .WithMany()
+            .HasForeignKey(job => job.InvoiceId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<DesktopDevice>()
+            .WithMany()
+            .HasForeignKey(job => job.DesktopDeviceId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<DevicePrinter>()
+            .WithMany()
+            .HasForeignKey(job => job.DevicePrinterId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<PrintProfile>()
+            .WithMany()
+            .HasForeignKey(job => job.PrintProfileId)
+            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<ApplicationUser>()
+            .WithMany()
+            .HasForeignKey(job => job.RequestedByUserId)
             .OnDelete(DeleteBehavior.NoAction);
     }
 }

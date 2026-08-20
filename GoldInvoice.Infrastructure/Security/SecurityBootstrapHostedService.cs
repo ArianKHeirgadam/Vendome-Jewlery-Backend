@@ -177,7 +177,12 @@ internal sealed class SecurityBootstrapHostedService(
             SecurityPermissions.SuppliersManage,
             SecurityPermissions.CrmRead,
             SecurityPermissions.CrmManage,
-            SecurityPermissions.SettingsRead
+            SecurityPermissions.SettingsRead,
+            SecurityPermissions.DesktopDevicesView,
+            SecurityPermissions.DesktopDevicesManage,
+            SecurityPermissions.DevicePrintersManage,
+            SecurityPermissions.DevicePrintProfilesManage,
+            SecurityPermissions.InvoicePrintJobsView
         ];
 
         string[] employeePermissions =
@@ -195,7 +200,9 @@ internal sealed class SecurityBootstrapHostedService(
             SecurityPermissions.ReportsRead,
             SecurityPermissions.SuppliersRead,
             SecurityPermissions.CrmRead,
-            SecurityPermissions.SettingsRead
+            SecurityPermissions.SettingsRead,
+            SecurityPermissions.DesktopDevicesView,
+            SecurityPermissions.InvoicePrintJobsView
         ];
 
         await GrantRolePermissionsAsync(

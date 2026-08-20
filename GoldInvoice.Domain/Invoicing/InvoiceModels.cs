@@ -16,6 +16,144 @@ public enum InvoicePrintStatus
     Failed
 }
 
+public sealed class InvoicePrintJob : AuditableEntity, IProtectedFromHardDelete
+{
+    private InvoicePrintJob()
+    {
+    }
+
+    public InvoicePrintJob(
+        Guid invoiceId,
+        Guid requestedByUserId,
+        Guid desktopDeviceId,
+        int copies,
+        bool isReprint,
+        string? reprintReason = null,
+        string? idempotencyKey = null)
+    {
+        Guard.AgainstEmpty(invoiceId, nameof(invoiceId));
+        Guard.AgainstEmpty(requestedByUserId, nameof(requestedByUserId));
+        Guard.AgainstEmpty(desktopDeviceId, nameof(desktopDeviceId));
+        Guard.AgainstNonPositive(copies, nameof(copies));
+        if (copies > 20)
+        {
+            throw new ArgumentOutOfRangeException(nameof(copies));
+        }
+
+        if (isReprint && string.IsNullOrWhiteSpace(reprintReason))
+        {
+            throw new ArgumentException("A reprint reason is required.", nameof(reprintReason));
+        }
+
+        if (!string.IsNullOrWhiteSpace(idempotencyKey) && idempotencyKey.Length > 128)
+        {
+            throw new ArgumentOutOfRangeException(nameof(idempotencyKey));
+        }
+
+        InvoiceId = invoiceId;
+        RequestedByUserId = requestedByUserId;
+        DesktopDeviceId = desktopDeviceId;
+        Copies = copies;
+        IsReprint = isReprint;
+        ReprintReason = Guard.Optional(reprintReason, nameof(reprintReason), 1000);
+        IdempotencyKeyHash = string.IsNullOrWhiteSpace(idempotencyKey)
+            ? null
+            : Guard.Required(idempotencyKey, nameof(idempotencyKey), 128).ToUpperInvariant();
+    }
+
+    public Guid InvoiceId { get; private set; }
+
+    public Guid RequestedByUserId { get; private set; }
+
+    public Guid DesktopDeviceId { get; private set; }
+
+    public Guid? DevicePrinterId { get; private set; }
+
+    public Guid? PrintProfileId { get; private set; }
+
+    public InvoicePrintStatus Status { get; private set; } = InvoicePrintStatus.Requested;
+
+    public int Copies { get; private set; }
+
+    public bool IsReprint { get; private set; }
+
+    public string? ReprintReason { get; private set; }
+
+    public string? IdempotencyKeyHash { get; private set; }
+
+    public int RetryCount { get; private set; }
+
+    public DateTimeOffset? CompletedAt { get; private set; }
+
+    public string? FailureCode { get; private set; }
+
+    public string? PrintedAtPrinterName { get; private set; }
+
+    public string? PrintedByAgentSignature { get; private set; }
+
+    public void AssignResources(Guid? devicePrinterId, Guid? printProfileId)
+    {
+        if (devicePrinterId == Guid.Empty || printProfileId == Guid.Empty)
+        {
+            throw new ArgumentException("Resource identifiers cannot be empty.");
+        }
+
+        if (Status != InvoicePrintStatus.Requested)
+        {
+            throw new DomainConflictException("Only a requested print job can have its resources assigned.");
+        }
+
+        DevicePrinterId = devicePrinterId;
+        PrintProfileId = printProfileId;
+    }
+
+    public void Retry(DateTimeOffset retriedAt)
+    {
+        if (Status != InvoicePrintStatus.Failed)
+        {
+            throw new DomainConflictException("Only a failed print job can be retried.");
+        }
+
+        RetryCount = RetryCount + 1;
+        Status = InvoicePrintStatus.Requested;
+        CompletedAt = null;
+        FailureCode = null;
+        PrintedAtPrinterName = null;
+        PrintedByAgentSignature = null;
+    }
+
+    public void MarkSucceeded(
+        DateTimeOffset completedAt,
+        string printerName,
+        string agentSignature)
+    {
+        Guard.AgainstDefault(completedAt, nameof(completedAt));
+        if (Status != InvoicePrintStatus.Requested)
+        {
+            throw new DomainConflictException("Only a requested print job can succeed.");
+        }
+
+        Status = InvoicePrintStatus.Succeeded;
+        CompletedAt = completedAt;
+        PrintedAtPrinterName = Guard.Required(printerName, nameof(printerName), 300);
+        PrintedByAgentSignature = Guard.Required(agentSignature, nameof(agentSignature), 512);
+        FailureCode = null;
+    }
+
+    public void MarkFailed(DateTimeOffset completedAt, string failureCode)
+    {
+        Guard.AgainstDefault(completedAt, nameof(completedAt));
+        if (Status != InvoicePrintStatus.Requested)
+        {
+            throw new DomainConflictException("Only a requested print job can fail.");
+        }
+
+        Status = InvoicePrintStatus.Failed;
+        CompletedAt = completedAt;
+        FailureCode = Guard.Required(failureCode, nameof(failureCode), 100);
+    }
+}
+
 public sealed class InvoiceSequence : AuditableEntity, IProtectedFromHardDelete
 {
     private InvoiceSequence()
@@ -447,7 +585,9 @@ public sealed class InvoicePrintLog : AuditableEntity, IProtectedFromHardDelete
         Guid requestedByUserId,
         int copies,
         bool isReprint,
-        string? reprintReason = null)
+        string? reprintReason = null,
+        Guid? printJobId = null,
+        Guid? desktopDeviceId = null)
     {
         Guard.AgainstEmpty(invoiceId, nameof(invoiceId));
         Guard.AgainstEmpty(requestedByUserId, nameof(requestedByUserId));
@@ -462,14 +602,28 @@ public sealed class InvoicePrintLog : AuditableEntity, IProtectedFromHardDelete
             throw new ArgumentException("A reprint reason is required.", nameof(reprintReason));
         }
 
+        if (printJobId == Guid.Empty)
+        {
+            throw new ArgumentException("The print job identifier cannot be empty.", nameof(printJobId));
+        }
+
+        if (desktopDeviceId == Guid.Empty)
+        {
+            throw new ArgumentException("The device identifier cannot be empty.", nameof(desktopDeviceId));
+        }
+
         InvoiceId = invoiceId;
         RequestedByUserId = requestedByUserId;
         Copies = copies;
         IsReprint = isReprint;
         ReprintReason = Guard.Optional(reprintReason, nameof(reprintReason), 1000);
+        PrintJobId = printJobId;
+        DesktopDeviceId = desktopDeviceId;
     }
 
     public Guid InvoiceId { get; private set; }
+
+    public Guid? PrintJobId { get; private set; }
 
     public Guid? DesktopDeviceId { get; private set; }
 

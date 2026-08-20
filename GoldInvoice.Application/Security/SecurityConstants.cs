@@ -39,7 +39,11 @@ public static class SecurityPermissions
     public const string SettingsRead = "Settings.Read";
     public const string SettingsManage = "Settings.Manage";
     public const string SessionsManage = "Sessions.Manage";
+    public const string DesktopDevicesView = "DesktopDevices.View";
     public const string DesktopDevicesManage = "DesktopDevices.Manage";
+    public const string DevicePrintersManage = "DevicePrinters.Manage";
+    public const string DevicePrintProfilesManage = "DevicePrintProfiles.Manage";
+    public const string InvoicePrintJobsView = "InvoicePrintJobs.View";
     public const string OutboxReprocess = "Outbox.Reprocess";
 
     public static readonly IReadOnlyList<PermissionDefinition> All =
@@ -67,7 +71,11 @@ public static class SecurityPermissions
         new(SettingsRead, "Read settings", "Settings"),
         new(SettingsManage, "Manage settings", "Settings"),
         new(SessionsManage, "Manage sessions", "Security"),
+        new(DesktopDevicesView, "View desktop devices", "Devices"),
         new(DesktopDevicesManage, "Manage desktop devices", "Devices"),
+        new(DevicePrintersManage, "Manage device printers", "Devices"),
+        new(DevicePrintProfilesManage, "Manage print profiles", "Devices"),
+        new(InvoicePrintJobsView, "View invoice print jobs", "Invoicing"),
         new(OutboxReprocess, "Reprocess outbox messages", "Integration")
     ];
 }

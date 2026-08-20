@@ -24,12 +24,19 @@ public sealed class DesktopDevice : AuditableEntity
     {
     }
 
-    public DesktopDevice(Guid registeredByUserId, string deviceIdentifierHash, string displayName)
+    public DesktopDevice(
+        Guid registeredByUserId,
+        string deviceIdentifierHash,
+        string displayName,
+        string? publicKeyPem = null,
+        string? publicKeyThumbprint = null)
     {
         Guard.AgainstEmpty(registeredByUserId, nameof(registeredByUserId));
         RegisteredByUserId = registeredByUserId;
         DeviceIdentifierHash = Guard.Required(deviceIdentifierHash, nameof(deviceIdentifierHash), 128);
         DisplayName = Guard.Required(displayName, nameof(displayName), 200);
+        PublicKeyPem = Guard.Optional(publicKeyPem, nameof(publicKeyPem), 4000);
+        PublicKeyThumbprint = Guard.Optional(publicKeyThumbprint, nameof(publicKeyThumbprint), 128);
     }
 
     public Guid RegisteredByUserId { get; private set; }
@@ -38,13 +45,57 @@ public sealed class DesktopDevice : AuditableEntity
 
     public string DisplayName { get; private set; } = string.Empty;
 
+    public string? PublicKeyPem { get; private set; }
+
     public string? PublicKeyThumbprint { get; private set; }
 
-    public bool IsActive { get; private set; } = true;
+    public bool IsActive { get; private set; }
+
+    public DateTimeOffset? ApprovedAt { get; private set; }
 
     public DateTimeOffset? LastSeenAt { get; private set; }
 
     public DateTimeOffset? RevokedAt { get; private set; }
+
+    public void Approve(DateTimeOffset approvedAt)
+    {
+        Guard.AgainstDefault(approvedAt, nameof(approvedAt));
+        if (IsActive || ApprovedAt is not null || RevokedAt is not null)
+        {
+            throw new DomainConflictException("Only a pending device can be approved.");
+        }
+
+        ApprovedAt = approvedAt;
+        IsActive = true;
+    }
+
+    public void Revoke(DateTimeOffset revokedAt)
+    {
+        Guard.AgainstDefault(revokedAt, nameof(revokedAt));
+        if (RevokedAt is not null)
+        {
+            throw new DomainConflictException("The device is already revoked.");
+        }
+
+        RevokedAt = revokedAt;
+        IsActive = false;
+    }
+
+    public void Heartbeat(DateTimeOffset seenAt)
+    {
+        Guard.AgainstDefault(seenAt, nameof(seenAt));
+        if (!IsActive || RevokedAt is not null)
+        {
+            throw new DomainConflictException("Only an approved device can report a heartbeat.");
+        }
+
+        LastSeenAt = seenAt;
+    }
+
+    public void BindThumbprint(string publicKeyThumbprint)
+    {
+        PublicKeyThumbprint = Guard.Required(publicKeyThumbprint, nameof(publicKeyThumbprint), 128);
+    }
 }
 
 public sealed class OutboxMessage : AuditableEntity, IProtectedFromHardDelete

@@ -109,7 +109,15 @@ public sealed class GoldInvoiceDbContext(
 
     public DbSet<InvoicePrintLog> InvoicePrintLogs => Set<InvoicePrintLog>();
 
+    public DbSet<InvoicePrintJob> InvoicePrintJobs => Set<InvoicePrintJob>();
+
     public DbSet<DesktopDevice> DesktopDevices => Set<DesktopDevice>();
+
+    public DbSet<DeviceRegistrationToken> DeviceRegistrationTokens => Set<DeviceRegistrationToken>();
+
+    public DbSet<DevicePrinter> DevicePrinters => Set<DevicePrinter>();
+
+    public DbSet<PrintProfile> PrintProfiles => Set<PrintProfile>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 

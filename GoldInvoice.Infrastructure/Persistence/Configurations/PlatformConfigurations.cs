@@ -12,14 +12,16 @@ internal sealed class DesktopDeviceConfiguration : IEntityTypeConfiguration<Desk
         builder.ToTable("DesktopDevices", DatabaseSchemas.Devices, table =>
         {
             table.HasCheckConstraint(
-                "CK_DesktopDevices_Revocation",
-                "([IsActive] = 1 AND [RevokedAt] IS NULL) OR ([IsActive] = 0 AND [RevokedAt] IS NOT NULL)");
+                "CK_DesktopDevices_State",
+                "([IsActive] = 1 AND [RevokedAt] IS NULL AND [ApprovedAt] IS NOT NULL) OR ([IsActive] = 0 AND [RevokedAt] IS NOT NULL) OR ([IsActive] = 0 AND [RevokedAt] IS NULL AND [ApprovedAt] IS NULL)");
         });
         builder.ConfigureAuditable();
         builder.Property(device => device.DeviceIdentifierHash).HasMaxLength(128).IsUnicode(false).IsRequired();
         builder.Property(device => device.DisplayName).HasMaxLength(200).IsRequired();
+        builder.Property(device => device.PublicKeyPem).HasMaxLength(4000);
         builder.Property(device => device.PublicKeyThumbprint).HasMaxLength(128).IsUnicode(false);
-        builder.Property(device => device.IsActive).HasDefaultValue(true);
+        builder.Property(device => device.IsActive).HasDefaultValue(false);
+        builder.Property(device => device.ApprovedAt).HasPrecision(7);
         builder.Property(device => device.LastSeenAt).HasPrecision(7);
         builder.Property(device => device.RevokedAt).HasPrecision(7);
         builder.HasIndex(device => device.DeviceIdentifierHash).IsUnique();
@@ -27,6 +29,88 @@ internal sealed class DesktopDeviceConfiguration : IEntityTypeConfiguration<Desk
         builder.HasOne<ApplicationUser>()
             .WithMany()
             .HasForeignKey(device => device.RegisteredByUserId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class DeviceRegistrationTokenConfiguration : IEntityTypeConfiguration<DeviceRegistrationToken>
+{
+    public void Configure(EntityTypeBuilder<DeviceRegistrationToken> builder)
+    {
+        builder.ToTable("DeviceRegistrationTokens", DatabaseSchemas.Devices, table =>
+        {
+            table.HasCheckConstraint("CK_DeviceRegistrationTokens_Expiry", "[ExpiresAt] > [CreatedAt]");
+            table.HasCheckConstraint(
+                "CK_DeviceRegistrationTokens_Use",
+                "([UsedAt] IS NULL) OR ([UsedAt] IS NOT NULL AND [ExpiresAt] > [UsedAt])");
+        });
+        builder.ConfigureAuditable();
+        builder.Property(token => token.TokenValueHash).HasMaxLength(128).IsUnicode(false).IsRequired();
+        builder.Property(token => token.ExpiresAt).HasPrecision(7);
+        builder.Property(token => token.UsedAt).HasPrecision(7);
+        builder.HasIndex(token => token.TokenValueHash).IsUnique();
+        builder.HasIndex(token => new { token.ExpiresAt, token.UsedAt });
+        builder.HasOne<ApplicationUser>()
+            .WithMany()
+            .HasForeignKey(token => token.CreatedById)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class DevicePrinterConfiguration : IEntityTypeConfiguration<DevicePrinter>
+{
+    public void Configure(EntityTypeBuilder<DevicePrinter> builder)
+    {
+        builder.ToTable("DevicePrinters", DatabaseSchemas.Devices, table =>
+        {
+            table.HasCheckConstraint(
+                "CK_DevicePrinters_Default",
+                "([IsDefault] = 0) OR ([IsDefault] = 1 AND [IsEnabled] = 1)");
+        });
+        builder.ConfigureAuditable();
+        builder.Property(printer => printer.SystemPrinterName).HasMaxLength(300).IsRequired();
+        builder.Property(printer => printer.DisplayName).HasMaxLength(200).IsRequired();
+        builder.Property(printer => printer.PrinterType).ConfigureEnum();
+        builder.Property(printer => printer.IsDefault).HasDefaultValue(false);
+        builder.Property(printer => printer.IsEnabled).HasDefaultValue(true);
+        builder.Property(printer => printer.LastSeenAt).HasPrecision(7);
+        builder.HasIndex(printer => new { printer.DesktopDeviceId, printer.SystemPrinterName }).IsUnique();
+        builder.HasIndex(printer => new { printer.DesktopDeviceId, printer.IsDefault })
+            .HasFilter("[IsDefault] = 1");
+        builder.HasOne<DesktopDevice>()
+            .WithMany()
+            .HasForeignKey(printer => printer.DesktopDeviceId)
+            .OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+internal sealed class PrintProfileConfiguration : IEntityTypeConfiguration<PrintProfile>
+{
+    public void Configure(EntityTypeBuilder<PrintProfile> builder)
+    {
+        builder.ToTable("PrintProfiles", DatabaseSchemas.Devices, table =>
+        {
+            table.HasCheckConstraint("CK_PrintProfiles_Copies", "[Copies] BETWEEN 1 AND 20");
+            table.HasCheckConstraint(
+                "CK_PrintProfiles_Margins",
+                "[MarginLeftMillimeters] BETWEEN 0 AND 1000 AND [MarginRightMillimeters] BETWEEN 0 AND 1000 AND [MarginTopMillimeters] BETWEEN 0 AND 1000 AND [MarginBottomMillimeters] BETWEEN 0 AND 1000");
+            table.HasCheckConstraint(
+                "CK_PrintProfiles_Default",
+                "([IsDefault] = 0) OR ([IsDefault] = 1 AND [IsEnabled] = 1)");
+        });
+        builder.ConfigureAuditable();
+        builder.Property(profile => profile.Name).HasMaxLength(200).IsRequired();
+        builder.Property(profile => profile.PaperSize).ConfigureEnum();
+        builder.Property(profile => profile.Orientation).ConfigureEnum();
+        builder.Property(profile => profile.ColorMode).ConfigureEnum();
+        builder.Property(profile => profile.IsDefault).HasDefaultValue(false);
+        builder.Property(profile => profile.IsEnabled).HasDefaultValue(true);
+        builder.HasIndex(profile => new { profile.DesktopDeviceId, profile.Name }).IsUnique();
+        builder.HasIndex(profile => new { profile.DesktopDeviceId, profile.IsDefault })
+            .HasFilter("[IsDefault] = 1");
+        builder.HasOne<DesktopDevice>()
+            .WithMany()
+            .HasForeignKey(profile => profile.DesktopDeviceId)
             .OnDelete(DeleteBehavior.NoAction);
     }
 }

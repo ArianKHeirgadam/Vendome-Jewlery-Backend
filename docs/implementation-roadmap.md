@@ -2,13 +2,14 @@
 
 ## Current Phase
 
-Phase 7C-A implementation: paid-invoice preview, audited document correction,
-PDF export, and local Desktop printing. Device enrollment and device-bound
-printer discovery remain Phase 7C-B.
+Phase 7C-B implementation: secure device enrollment, device-bound printer
+discovery, durable print jobs, and the Windows print agent. Device enrollment,
+printer discovery, and device-bound durable dispatch are complete; remaining
+work is hardware verification on the target machine and Phase 8 hardening.
 
 The user confirmed on 2026-08-10 that the Phase 5 restore, build, complete test suite, and database verification passed. After the Phase 6 cancellation/scope fixes, the user also reported the complete 97-test suite passing on the target .NET 8 environment and authorized the next phase. SQL Server concurrent-claim evidence, final migration/model verification, commit, and push must still be recorded in the Phase 6 completion report rather than being silently assumed.
 
-Phase 7A introduced no database-model change and integrated the existing Phase 3 authentication and Phase 6 SignalR contracts with the shared React client and WPF/WebView2 host. Phase 7B connects every management route to authorized data and adds the missing supplier and CRM persistence. Phase 7C-A reuses the existing invoice, audit, permission, and print-log model to complete local document output without another migration.
+Phase 7A introduced no database-model change and integrated the existing Phase 3 authentication and Phase 6 SignalR contracts with the shared React client and WPF/WebView2 host. Phase 7B connects every management route to authorized data and adds the missing supplier and CRM persistence. Phase 7C-A reuses the existing invoice, audit, permission, and print-log model to complete local document output without another migration. Phase 7C-B adds device-bound enrollment, printer/profile model, and durable print jobs through a new additive migration.
 
 The committed migration chain is:
 
@@ -16,6 +17,7 @@ The committed migration chain is:
 2. `20260731213000_AddPhase4CatalogPricingInventory`
 3. `20260801130000_AddPhase5OrdersPaymentsInvoices`
 4. `20260811143000_AddPhase7BusinessDirectories`
+5. `20260820142605_AddPhase7CBDeviceBoundPrinting`
 
 The first three shared migrations remain immutable. Phase 7B is represented only by the fourth additive migration; every future database change must likewise use a new migration rather than rewriting history.
 
@@ -169,7 +171,9 @@ Phase 6 implementation details are recorded in `docs/architecture/phase-6-worker
 
 Phase 7A now provides the shared React source tree, WPF/WebView2 host, complete existing authentication state machine, DPAPI-protected Desktop refresh-token storage, API endpoint configuration, authorized SignalR connection, event de-duplication, and reconnect cursor recovery. Its decisions and verification gate are recorded in `docs/architecture/phase-7a-desktop-client-integration.md`.
 
-Phase 7B now completes the operational management pages, authenticated data loading, directories, suppliers, and CRM. Phase 7C-A completes automatic post-payment invoice opening, an A4 RTL preview, audited correction of non-financial print fields, PDF export, and local default-printer output. Its decisions are recorded in `docs/architecture/phase-7c-invoice-documents.md`. The remaining device-bound requirements below are Phase 7C-B.
+Phase 7B now completes the operational management pages, authenticated data loading, directories, suppliers, and CRM. Phase 7C-A completes automatic post-payment invoice opening, an A4 RTL preview, audited correction of non-financial print fields, PDF export, and local default-printer output. Its decisions are recorded in `docs/architecture/phase-7c-invoice-documents.md`.
+
+Phase 7C-B now completes secure Desktop-device enrollment (short-lived registration tokens, explicit approval, public-key/thumbprint binding, heartbeat, revocation), device-bound `DevicePrinter` and `PrintProfile` model, and the durable `InvoicePrintJob` workflow with idempotency, retries, sanitized failure codes, and immutable one-way `InvoicePrintLog` attempts. A new `GoldInvoice.PrintAgent` Windows executable polls signed job endpoints, renders the server-supplied printable document in a hidden WebView2, prints to the system default printer, and reports one-way signed results. Its decisions are recorded in `docs/architecture/phase-7c-invoice-documents.md` and verification is covered by `GoldInvoice.IntegrationTests/PhaseSevenCBDevicePrintingTests.cs` (112 tests total, all passing).
 
 #### Existing foundation to reuse
 
@@ -267,8 +271,9 @@ Phase 7B now completes the operational management pages, authenticated data load
 1. Run restore, Release build, and the complete test suite on the target Windows/.NET 8 environment.
 2. Start `GoldInvoice.Api` and `VendomeJewleryDesktopApp` together and verify password login, required MFA, first-login MFA enrollment, refresh rotation across restart, logout, and rejected/revoked sessions.
 3. Disconnect and reconnect the API and verify that the React client receives only its user/role audiences, de-duplicates event IDs, and advances the recovery cursor.
-4. Confirm `GoldInvoiceDbContext.Database.HasPendingModelChanges()` remains false and the migration list contains the three earlier migrations plus `AddPhase7BusinessDirectories`.
-5. Record Phase 7C-A invoice-document verification, then implement Phase 7C-B device enrollment, printer discovery, and device-bound profiles through a new additive migration.
+4. Confirm `GoldInvoiceDbContext.Database.HasPendingModelChanges()` remains false and the migration list contains the four earlier migrations plus `AddPhase7CBDeviceBoundPrinting`.
+5. Verify the Phase 7C-B workflow on the target machine: apply the new migration against the real SQL Server, launch `GoldInvoice.PrintAgent enroll --server … --token …`, approve the device in the Admin UI or API, define a device printer/profile, request a device print job through `POST /api/v1/invoices/{invoiceId}/device-print-jobs`, and confirm the agent prints and reports one-way completion, then verify retry and reprint behavior.
+6. Begin Phase 8 hardening: query-plan review, pagination enforcement, retention policies, key rotation, dependency scanning, and production-like load/concurrency tests.
 
 ## Phase Completion Report Template
 

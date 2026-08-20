@@ -7,6 +7,7 @@ using GoldInvoice.Application.Integration;
 using GoldInvoice.Application.Orders;
 using GoldInvoice.Application.Payments;
 using GoldInvoice.Application.People;
+using GoldInvoice.Application.Platform;
 using GoldInvoice.Application.Pricing;
 using GoldInvoice.Application.Security;
 using GoldInvoice.Application.Settings;
@@ -14,6 +15,7 @@ using GoldInvoice.Infrastructure.Catalog;
 using GoldInvoice.Infrastructure.Business;
 using GoldInvoice.Infrastructure.Configuration;
 using GoldInvoice.Infrastructure.Customers;
+using GoldInvoice.Infrastructure.Devices;
 using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Inventory;
 using GoldInvoice.Infrastructure.Invoicing;
@@ -131,6 +133,9 @@ public static class DependencyInjection
         services.AddScoped<IOutboxAdministrationService, OutboxAdministrationService>();
         services.AddScoped<IIntegrationEventQueryService, IntegrationEventQueryService>();
         services.AddScoped<IDataRetentionService, DataRetentionService>();
+        services.AddScoped<DesktopDeviceService>();
+        services.AddScoped<IDesktopDeviceService>(provider => provider.GetRequiredService<DesktopDeviceService>());
+        services.AddScoped<IInvoicePrintJobService, InvoicePrintJobService>();
 
         return services;
     }

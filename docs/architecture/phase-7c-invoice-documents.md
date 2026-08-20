@@ -89,3 +89,104 @@ prints and authorized reprints retain separate print attempts. The React
 TypeScript check, production build, and dependency audit are part of
 `scripts/verify-phase7b.ps1`; the full .NET/WPF build and tests run on the target
 Windows .NET 8 environment.
+
+## Phase 7C-B: device-bound printing
+
+### Scope
+
+This increment completes device-bound printing across the earlier backend
+foundation. Secure Desktop-device enrollment, device-owned printers and print
+profiles, and a durable, idempotent, retryable `InvoicePrintJob` workflow are
+added through the additive migration
+`20260820142605_AddPhase7CBDeviceBoundPrinting`. The new
+`GoldInvoice.PrintAgent` executable polls the server for signed print jobs,
+renders the server-supplied printable HTML in a hidden WebView2, prints to the
+system default printer, and reports one-way signed results. The agent is a
+separate .NET 8 Windows project added to the solution.
+
+### Device enrollment and authorization
+
+- Registration tokens are short-lived, single-use, and stored only as a
+  SHA-256 hash. Enrollment is anonymous but requires a still-valid, unused
+  token; reuse or expiry is rejected.
+- A new Desktop device starts `pending` and is inert until an authorized
+  administrator `approves` it. `IsActive` defaults to `false`; the check
+  constraint `CK_DesktopDevices_State` permits exactly pending, approved-active,
+  and revoked states.
+- The device supplies a public key (PEM). The server computes the SHA-256
+  thumbprint of the decoded DER SPKI and stores both; the client never supplies
+  the thumbprint.
+- After approval the device signs every poll, document, completion, and
+  heartbeat request. The server verifies RSA PKCS1/SHA256 against the stored
+  public key with a five-minute replay window. Boss/Admin UI or the API revokes
+  a device to cut off the agent immediately.
+- Poll and completion endpoints are anonymous but require a valid device
+  signature; management endpoints (enrollment tokens, approval, printers,
+  profiles, job dispatch, retry) require the new explicit permissions
+  `DesktopDevicesManage`, `DevicePrintersManage`, `DevicePrintProfilesManage`,
+  and `InvoicePrintJobsView`. Customers are denied all device, printer, job,
+  and result-reporting APIs.
+
+### Signed payloads
+
+Signature payloads are `{operation}|{…}|{timestamp:o}` with the timestamp and a
+Base64 RSA signature sent on the query string or in the body:
+
+- `heartbeat|{deviceId:N}|{timestamp:o}`
+- `poll|{deviceId:N}|{timestamp:o}`
+- `document|{jobId:N}|{deviceId:N}|{timestamp:o}`
+- `complete|{jobId:N}|{deviceId:N}|{timestamp:o}|{Succeeded}|{PrinterName}|{FailureCode}`
+
+The agent stores its base URL, device id, and private key in the current user's
+LocalApplicationData under DPAPI protection.
+
+### Printers and profiles
+
+- `DevicePrinter` is scoped to a `DesktopDeviceId`; the system printer name is
+  unique per device, and at most one device printer may be `IsDefault` and
+  enabled at a time (filtered unique index
+  `IX_DevicePrinters_DesktopDeviceId_IsDefault`).
+- `PrintProfile` captures paper size, orientation, copy count (1-20), color
+  mode, and typed margins, with at most one enabled default per device
+  (`IX_PrintProfiles_DesktopDeviceId_IsDefault`).
+- Before dispatch the server verifies the printer belongs to the approved
+  device and is enabled.
+
+### Durable job workflow
+
+- `POST /api/v1/invoices/{invoiceId}/device-print-jobs` records a durable
+  `InvoicePrintJob` with an idempotency key. A repeated key for the same invoice
+  returns the existing job; reusing a key for a different invoice or creating a
+  second pending job is a conflict.
+- The agent files only `Requested` jobs and reports either `Succeeded` or the
+  sanitized failure code. Failure codes are limited to
+  `PRINTER_UNAVAILABLE`, `PRINTER_OFFLINE`, `OUT_OF_PAPER`,
+  `PRINTER_JAM`, `PRINT_CANCELLED`, and `GENERIC_FAILURE`; raw operating-system
+  text is rejected.
+- Every attempt writes an immutable `InvoicePrintLog` row. Completion targets
+  the newest `Requested` attempt and never rewrites a terminal attempt; a retry
+  (`RetryCount++`) appends a new attempt only from `Failed`. Reprints require
+  the reprint permission and a reason and never erase earlier attempts. The
+  `IX_InvoicePrintLogs_PrintJobId` index is non-unique to allow multiple
+  attempts per job.
+- Document GET is signed and returns the server-rendered printable A4 RTL HTML
+  built only from authoritative snapshot fields with every dynamic string
+  HTML-escaped and scripts disabled.
+
+### Agent
+
+`GoldInvoice.PrintAgent` runs `enroll --server … --token … [--name …]` to bind
+its generated RSA identity, then `run` to poll every ten seconds, print each
+pending job through a hidden WPF WebView2 `PrintAsync` to the system default
+printer, and complete with a signed report. `CoreWebView2PrintStatus` is mapped
+to the sanitized failure codes above.
+
+### Verification
+
+`GoldInvoice.IntegrationTests/PhaseSevenCBDevicePrintingTests.cs` covers
+enrollment lifecycle and token replay, printer ownership/enabled checks,
+idempotency-key reuse, cross-invoice and duplicate-pending conflicts,
+signature authorization including impostor, stale, and replayed requests,
+sanitized failure codes, retry plus immutable log history, reprint approval,
+one-default-printer/profile enforcement, and signed document retrieval. The
+full suite is 112 tests, all passing.
