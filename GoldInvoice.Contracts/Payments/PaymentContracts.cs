@@ -103,6 +103,24 @@ public sealed class RecordManualPaymentRequest
     public string? Reference { get; init; }
 }
 
+public sealed class VerifyReviewPaymentRequest
+{
+    [StringLength(200)]
+    public string? GatewayPaymentId { get; init; }
+
+    [Required, StringLength(256)]
+    public string RowVersion { get; init; } = string.Empty;
+}
+
+public sealed class RejectReviewPaymentRequest
+{
+    [Required, StringLength(1000)]
+    public string Reason { get; init; } = string.Empty;
+
+    [Required, StringLength(256)]
+    public string RowVersion { get; init; } = string.Empty;
+}
+
 public sealed class PaymentCallbackResponse
 {
     public required Guid CallbackId { get; init; }

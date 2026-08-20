@@ -49,7 +49,7 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.HasIndex(payment => new { payment.OrderId, payment.CreatedAt });
         builder.HasIndex(payment => payment.OrderId)
             .IsUnique()
-            .HasFilter("[Status] IN ('Pending', 'Processing', 'RequiresReview')");
+            .HasFilter("[Status] IN ('Pending', 'Processing', 'RequiresReview', 'Verified')");
         builder.HasIndex(payment => payment.IdempotencyKeyHash)
             .IsUnique()
             .HasFilter("[IdempotencyKeyHash] IS NOT NULL");

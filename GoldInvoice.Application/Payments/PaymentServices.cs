@@ -68,6 +68,18 @@ public sealed record RecordManualPaymentCommand(
     string? Reference,
     string IdempotencyKey);
 
+public sealed record VerifyReviewPaymentCommand(
+    Guid ActorUserId,
+    Guid PaymentId,
+    string? GatewayPaymentId,
+    string RowVersion);
+
+public sealed record RejectReviewPaymentCommand(
+    Guid ActorUserId,
+    Guid PaymentId,
+    string Reason,
+    string RowVersion);
+
 public sealed record PaymentInitiationInfo(PaymentInfo Payment, string RedirectUrl);
 
 public sealed record PaymentGatewayInitiationRequest(
@@ -156,6 +168,14 @@ public interface IPaymentService
 
     Task<PaymentInfo> RecordManualPaymentAsync(
         RecordManualPaymentCommand command,
+        CancellationToken cancellationToken);
+
+    Task<PaymentInfo> VerifyReviewPaymentAsync(
+        VerifyReviewPaymentCommand command,
+        CancellationToken cancellationToken);
+
+    Task<PaymentInfo> RejectReviewPaymentAsync(
+        RejectReviewPaymentCommand command,
         CancellationToken cancellationToken);
 
     Task<PaymentCallbackProcessingInfo> ProcessCallbackAsync(

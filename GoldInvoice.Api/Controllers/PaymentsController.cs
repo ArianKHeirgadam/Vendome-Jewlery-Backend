@@ -129,6 +129,34 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
                 idempotencyKey),
             cancellationToken)));
 
+    [Authorize(Policy = SecurityPermissions.PaymentsManage)]
+    [HttpPost("{paymentId:guid}/review/verify")]
+    public async Task<ActionResult<PaymentResponse>> VerifyReview(
+        Guid paymentId,
+        VerifyReviewPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        Ok(Map(await paymentService.VerifyReviewPaymentAsync(
+            new VerifyReviewPaymentCommand(
+                User.GetRequiredUserId(),
+                paymentId,
+                request.GatewayPaymentId,
+                request.RowVersion),
+            cancellationToken)));
+
+    [Authorize(Policy = SecurityPermissions.PaymentsManage)]
+    [HttpPost("{paymentId:guid}/review/reject")]
+    public async Task<ActionResult<PaymentResponse>> RejectReview(
+        Guid paymentId,
+        RejectReviewPaymentRequest request,
+        CancellationToken cancellationToken) =>
+        Ok(Map(await paymentService.RejectReviewPaymentAsync(
+            new RejectReviewPaymentCommand(
+                User.GetRequiredUserId(),
+                paymentId,
+                request.Reason,
+                request.RowVersion),
+            cancellationToken)));
+
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicyNames.PaymentCallback)]
     [HttpPost("callbacks/{providerCode}")]

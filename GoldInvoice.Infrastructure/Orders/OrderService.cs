@@ -373,17 +373,28 @@ internal sealed class OrderService(
         PersistenceUtilities.SetOriginalRowVersion(dbContext, order, command.RowVersion);
         var fromStatus = order.Status;
         var now = timeProvider.GetUtcNow();
-        order.Cancel(now);
-        await reservationCoordinator.ReleaseForCancellationAsync(
-            order.Id,
-            command.Reason,
-            cancellationToken);
         var payments = await dbContext.Payments
             .Where(payment => payment.OrderId == order.Id &&
                 (payment.Status == PaymentStatus.Pending ||
                  payment.Status == PaymentStatus.Processing ||
                  payment.Status == PaymentStatus.RequiresReview))
             .ToListAsync(cancellationToken);
+        if (payments.Any(payment =>
+                payment.Status is PaymentStatus.Pending or PaymentStatus.Processing))
+        {
+            // An in-flight gateway transaction can complete at any moment;
+            // cancelling now would strand the customer's money with the
+            // provider (the late callback would be rejected as a final-state
+            // mismatch and the order would end cancelled). Let the payment
+            // finish or fail on its own first.
+            throw new ApplicationConflictException();
+        }
+
+        order.Cancel(now);
+        await reservationCoordinator.ReleaseForCancellationAsync(
+            order.Id,
+            command.Reason,
+            cancellationToken);
         foreach (var payment in payments)
         {
             payment.Cancel(now);

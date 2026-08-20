@@ -3,6 +3,7 @@ using GoldInvoice.Application.People;
 using GoldInvoice.Application.Security;
 using GoldInvoice.Infrastructure.Identity;
 using GoldInvoice.Infrastructure.Persistence;
+using GoldInvoice.Infrastructure.Security;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,7 +11,8 @@ namespace GoldInvoice.Infrastructure.People;
 
 internal sealed class PeopleDirectoryService(
     GoldInvoiceDbContext dbContext,
-    UserManager<ApplicationUser> userManager) : IPeopleDirectoryService
+    UserManager<ApplicationUser> userManager,
+    AccessResolutionCache accessCache) : IPeopleDirectoryService
 {
     public Task<IReadOnlyList<PersonInfo>> GetCustomersAsync(
         string? query,
@@ -179,6 +181,8 @@ internal sealed class PeopleDirectoryService(
             await userManager.DeleteAsync(user);
             throw new ApplicationConflictException();
         }
+
+        accessCache.Invalidate(user.Id);
 
         return (await EnrichAsync(
             [user],

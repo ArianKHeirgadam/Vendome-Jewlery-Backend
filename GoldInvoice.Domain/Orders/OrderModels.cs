@@ -97,6 +97,12 @@ public sealed class Order : AuditableEntity, IProtectedFromHardDelete
         Status = OrderStatus.PaymentReview;
     }
 
+    public void MoveBackToAwaitingPayment()
+    {
+        EnsureStatus(OrderStatus.PaymentReview);
+        Status = OrderStatus.AwaitingPayment;
+    }
+
     public void MarkPaid(DateTimeOffset paidAt)
     {
         Guard.AgainstDefault(paidAt, nameof(paidAt));

@@ -8,6 +8,7 @@ namespace GoldInvoice.Infrastructure.Security;
 
 internal sealed class AccessTokenPrincipalValidator(
     GoldInvoiceDbContext dbContext,
+    AccessResolutionCache accessCache,
     TimeProvider timeProvider) : IAccessTokenPrincipalValidator
 {
     public async Task<bool> ValidateAndEnrichAsync(
@@ -51,7 +52,10 @@ internal sealed class AccessTokenPrincipalValidator(
             return false;
         }
 
-        var access = await SecurityAccessQueries.ResolveAsync(dbContext, userId, cancellationToken);
+        var access = await accessCache.GetOrLoadAsync(
+            userId,
+            () => SecurityAccessQueries.ResolveAsync(dbContext, userId, cancellationToken),
+            cancellationToken);
         var privileged = access.Roles.Contains(SecurityRoles.Owner, StringComparer.Ordinal) ||
             access.Roles.Contains(SecurityRoles.Admin, StringComparer.Ordinal);
         var mfaAuthenticated = principal.Claims.Any(claim =>

@@ -116,6 +116,53 @@ public sealed class PhaseFiveWorkflowTests
     }
 
     [Fact]
+    public async Task CancelOrder_WithInFlightPayment_IsRejected()
+    {
+        await using var scenario = await CreateScenarioAsync();
+        var payment = new Payment(
+            scenario.Order.Id,
+            "ZARINPAL",
+            scenario.Order.GrandTotalRials,
+            PaymentMethod.OnlineGateway,
+            paymentGatewayId: null,
+            PersistenceUtilities.Hash(
+                $"Payments.Online:{scenario.Customer.Id:N}:cancel-guard-key"));
+        scenario.Context.Payments.Add(payment);
+        await scenario.Context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            scenario.OrderService.CancelOrderAsync(
+                scenario.Order.Id,
+                new CancelOrderCommand(
+                    scenario.Customer.Id,
+                    CanManageOrders: true,
+                    "customer changed mind",
+                    scenario.Order.RowVersion),
+                CancellationToken.None));
+
+        // The order and the in-flight payment must be left untouched.
+        Assert.Equal(OrderStatus.AwaitingPayment, (await scenario.Context.Orders.SingleAsync()).Status);
+        Assert.Equal(PaymentStatus.Pending, (await scenario.Context.Payments.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task CancelOrder_WithNoInFlightPayment_Succeeds()
+    {
+        await using var scenario = await CreateScenarioAsync();
+
+        var cancelled = await scenario.OrderService.CancelOrderAsync(
+            scenario.Order.Id,
+            new CancelOrderCommand(
+                scenario.Customer.Id,
+                CanManageOrders: true,
+                "no longer needed",
+                scenario.Order.RowVersion),
+            CancellationToken.None);
+
+        Assert.Equal(OrderStatus.Cancelled, cancelled.Status);
+    }
+
+    [Fact]
     public async Task TrustFund_AllocationRequiresSufficientBalance()
     {
         await using var scenario = await CreateScenarioAsync();

@@ -130,6 +130,7 @@ public static class DependencyInjection
         services.AddSingleton<IOutboxDispatcher, OutboxDispatcher>();
         services.AddScoped<IOutboxAdministrationService, OutboxAdministrationService>();
         services.AddScoped<IIntegrationEventQueryService, IntegrationEventQueryService>();
+        services.AddScoped<IDataRetentionService, DataRetentionService>();
 
         return services;
     }
@@ -204,6 +205,8 @@ public static class DependencyInjection
         services.AddDataProtection()
             .SetApplicationName("GoldInvoice");
         services.TryAddSingleton(TimeProvider.System);
+        services.AddMemoryCache();
+        services.AddSingleton<AccessResolutionCache>();
         services.AddSingleton<IDummyPasswordVerifier, DummyPasswordVerifier>();
         services.AddScoped<ISecurityTokenService, SecurityTokenService>();
         services.AddScoped<IAccountAuthenticationService, AccountAuthenticationService>();

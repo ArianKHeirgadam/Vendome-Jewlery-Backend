@@ -168,6 +168,23 @@ public sealed class Payment : AuditableEntity, IProtectedFromHardDelete
         FailureCode = null;
     }
 
+    public void VerifyFromReview(string? gatewayPaymentId, DateTimeOffset verifiedAt)
+    {
+        Guard.AgainstDefault(verifiedAt, nameof(verifiedAt));
+        if (Status != PaymentStatus.RequiresReview)
+        {
+            throw new DomainConflictException("Only a payment under review can be verified from review.");
+        }
+
+        GatewayPaymentId = string.IsNullOrWhiteSpace(gatewayPaymentId)
+            ? $"MANUAL-{Id:N}"
+            : Guard.Required(gatewayPaymentId, nameof(gatewayPaymentId), 200);
+        Status = PaymentStatus.Verified;
+        VerifiedAt = verifiedAt;
+        FailedAt = null;
+        FailureCode = null;
+    }
+
     public void RequireReview(string failureCode)
     {
         if (Status is PaymentStatus.Verified or PaymentStatus.Cancelled or PaymentStatus.Refunded)

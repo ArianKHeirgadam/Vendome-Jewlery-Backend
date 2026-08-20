@@ -262,7 +262,7 @@ internal sealed class PaymentService(
                     throw new ApplicationConflictException();
                 }
 
-                await reservationCoordinator.EnsurePayableAsync(order.Id, cancellationToken);
+                await EnsureDeliverableAsync(order.Id, cancellationToken);
                 payment = existing;
                 await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
             }
@@ -276,7 +276,7 @@ internal sealed class PaymentService(
                     throw new ApplicationConflictException();
                 }
 
-                await reservationCoordinator.EnsurePayableAsync(order.Id, cancellationToken);
+                await EnsureDeliverableAsync(order.Id, cancellationToken);
                 var hasActivePayment = await dbContext.Payments.AnyAsync(
                     candidate => candidate.OrderId == order.Id &&
                         (candidate.Status == PaymentStatus.Pending ||
@@ -404,7 +404,7 @@ internal sealed class PaymentService(
             throw new ApplicationConflictException();
         }
 
-        await reservationCoordinator.EnsurePayableAsync(order.Id, cancellationToken);
+        await EnsureDeliverableAsync(order.Id, cancellationToken);
         var otherPayments = await dbContext.Payments
             .Where(candidate => candidate.OrderId == order.Id &&
                 (candidate.Status == PaymentStatus.Pending ||
@@ -451,6 +451,120 @@ internal sealed class PaymentService(
             payment.Id,
             now,
             cancellationToken);
+        await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+        await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+        return await MapPaymentAsync(payment, cancellationToken);
+    }
+
+    public async Task<PaymentInfo> VerifyReviewPaymentAsync(
+        VerifyReviewPaymentCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ValidateActor(command.ActorUserId);
+        if (command.PaymentId == Guid.Empty)
+        {
+            throw new ArgumentException("A valid payment is required.", nameof(command));
+        }
+
+        await using var transaction = await PersistenceUtilities.BeginSerializableTransactionAsync(
+            dbContext,
+            cancellationToken);
+        var payment = await dbContext.Payments.FindAsync([command.PaymentId], cancellationToken) ??
+            throw new ApplicationResourceNotFoundException();
+        PersistenceUtilities.SetOriginalRowVersion(dbContext, payment, command.RowVersion);
+        if (payment.Status != PaymentStatus.RequiresReview)
+        {
+            throw new ApplicationConflictException();
+        }
+
+        var order = await dbContext.Orders.FindAsync([payment.OrderId], cancellationToken) ??
+            throw new InvalidOperationException("The payment is missing its order.");
+        if (order.Status != OrderStatus.PaymentReview)
+        {
+            throw new ApplicationConflictException();
+        }
+
+        var now = timeProvider.GetUtcNow();
+        await EnsureDeliverableAsync(order.Id, cancellationToken);
+        payment.VerifyFromReview(command.GatewayPaymentId, now);
+        var previousStatus = order.Status;
+        order.MarkPaid(now);
+        dbContext.OrderStatusHistory.Add(new OrderStatusHistory(
+            order.Id,
+            previousStatus,
+            OrderStatus.Paid,
+            now,
+            command.ActorUserId,
+            "Payment review verified with funds received"));
+        outboxWriter.AddOrderStatusChanged(order, previousStatus, now);
+        await reservationCoordinator.ConfirmForPaymentAsync(
+            order.Id,
+            payment.Id,
+            now,
+            cancellationToken);
+        await invoiceIssuanceService.IssueForPaidOrderAsync(
+            order.Id,
+            payment.Id,
+            now,
+            cancellationToken);
+        await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
+        await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
+        return await MapPaymentAsync(payment, cancellationToken);
+    }
+
+    public async Task<PaymentInfo> RejectReviewPaymentAsync(
+        RejectReviewPaymentCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ValidateActor(command.ActorUserId);
+        if (command.PaymentId == Guid.Empty)
+        {
+            throw new ArgumentException("A valid payment is required.", nameof(command));
+        }
+
+        var reason = command.Reason?.Trim();
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A rejection reason is required.", nameof(command));
+        }
+
+        await using var transaction = await PersistenceUtilities.BeginSerializableTransactionAsync(
+            dbContext,
+            cancellationToken);
+        var payment = await dbContext.Payments.FindAsync([command.PaymentId], cancellationToken) ??
+            throw new ApplicationResourceNotFoundException();
+        PersistenceUtilities.SetOriginalRowVersion(dbContext, payment, command.RowVersion);
+        if (payment.Status != PaymentStatus.RequiresReview)
+        {
+            throw new ApplicationConflictException();
+        }
+
+        var order = await dbContext.Orders.FindAsync([payment.OrderId], cancellationToken) ??
+            throw new InvalidOperationException("The payment is missing its order.");
+        if (order.Status is not OrderStatus.PaymentReview and not OrderStatus.AwaitingPayment)
+        {
+            throw new ApplicationConflictException();
+        }
+
+        var now = timeProvider.GetUtcNow();
+        payment.Fail("REVIEW_REJECTED", now);
+        var previousStatus = order.Status;
+        if (order.Status == OrderStatus.PaymentReview)
+        {
+            order.MoveBackToAwaitingPayment();
+        }
+
+        dbContext.OrderStatusHistory.Add(new OrderStatusHistory(
+            order.Id,
+            previousStatus,
+            order.Status,
+            now,
+            command.ActorUserId,
+            reason.Length <= 1000 ? reason : reason[..1000]));
+        outboxWriter.AddOrderStatusChanged(order, previousStatus, now);
+
         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
         return await MapPaymentAsync(payment, cancellationToken);
@@ -665,7 +779,7 @@ internal sealed class PaymentService(
 
         try
         {
-            await reservationCoordinator.EnsurePayableAsync(order.Id, cancellationToken);
+            await EnsureDeliverableAsync(order.Id, cancellationToken);
         }
         catch (ApplicationConflictException)
         {
@@ -806,6 +920,24 @@ internal sealed class PaymentService(
         await PersistenceUtilities.SaveChangesAsync(dbContext, cancellationToken);
         await PersistenceUtilities.CommitAsync(transaction, cancellationToken);
     }
+
+    private async Task EnsureDeliverableAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await reservationCoordinator.EnsurePayableAsync(orderId, cancellationToken);
+        }
+        catch (ApplicationConflictException)
+        {
+            await ReactivateExpiredReservationsAsync(orderId, cancellationToken);
+        }
+    }
+
+    private Task ReactivateExpiredReservationsAsync(Guid orderId, CancellationToken cancellationToken) =>
+        reservationCoordinator.ReactivateExpiredReservationsAsync(
+            orderId,
+            TimeSpan.FromMinutes(options.Value.ReservationReactivationMinutes),
+            cancellationToken);
 
     private void MoveOrderToReview(Order order, DateTimeOffset occurredAt, string reason)
     {
