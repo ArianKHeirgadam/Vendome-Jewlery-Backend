@@ -45,6 +45,13 @@ public sealed class DesktopDevice : AuditableEntity
     public DateTimeOffset? LastSeenAt { get; private set; }
 
     public DateTimeOffset? RevokedAt { get; private set; }
+
+    public void Refresh(string displayName, DateTimeOffset lastSeenAt)
+    {
+        DisplayName = Guard.Required(displayName, nameof(displayName), 200);
+        Guard.AgainstDefault(lastSeenAt, nameof(lastSeenAt));
+        LastSeenAt = lastSeenAt;
+    }
 }
 
 public sealed class OutboxMessage : AuditableEntity, IProtectedFromHardDelete
