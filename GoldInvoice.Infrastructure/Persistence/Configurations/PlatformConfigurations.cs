@@ -18,12 +18,16 @@ internal sealed class DesktopDeviceConfiguration : IEntityTypeConfiguration<Desk
         builder.ConfigureAuditable();
         builder.Property(device => device.DeviceIdentifierHash).HasMaxLength(128).IsUnicode(false).IsRequired();
         builder.Property(device => device.DisplayName).HasMaxLength(200).IsRequired();
+        builder.Property(device => device.DeviceType).ConfigureEnum();
+        builder.Property(device => device.Model).HasMaxLength(200);
         builder.Property(device => device.PublicKeyThumbprint).HasMaxLength(128).IsUnicode(false);
         builder.Property(device => device.IsActive).HasDefaultValue(true);
+        builder.Property(device => device.IsOnline).HasDefaultValue(false);
         builder.Property(device => device.LastSeenAt).HasPrecision(7);
         builder.Property(device => device.RevokedAt).HasPrecision(7);
         builder.HasIndex(device => device.DeviceIdentifierHash).IsUnique();
         builder.HasIndex(device => new { device.IsActive, device.LastSeenAt });
+        builder.HasIndex(device => new { device.RegisteredByUserId, device.DeviceType, device.IsOnline });
         builder.HasOne<ApplicationUser>()
             .WithMany()
             .HasForeignKey(device => device.RegisteredByUserId)
@@ -38,12 +42,8 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         builder.ToTable("OutboxMessages", DatabaseSchemas.Integration, table =>
         {
             table.HasCheckConstraint("CK_OutboxMessages_RetryCount", "[RetryCount] >= 0");
-            table.HasCheckConstraint(
-                "CK_OutboxMessages_Status",
-                "[Status] IN ('Pending', 'Processing', 'Processed', 'Failed', 'DeadLetter')");
-            table.HasCheckConstraint(
-                "CK_OutboxMessages_Processing",
-                "([Status] = 'Processing' AND [LockId] IS NOT NULL AND [LockedUntil] IS NOT NULL) OR [Status] <> 'Processing'");
+            table.HasCheckConstraint("CK_OutboxMessages_Status", "[Status] IN ('Pending', 'Processing', 'Processed', 'Failed', 'DeadLetter')");
+            table.HasCheckConstraint("CK_OutboxMessages_Processing", "([Status] = 'Processing' AND [LockId] IS NOT NULL AND [LockedUntil] IS NOT NULL) OR [Status] <> 'Processing'");
         });
         builder.ConfigureAuditable();
         builder.Property(message => message.MessageType).HasMaxLength(300).IsUnicode(false).IsRequired();
@@ -55,8 +55,7 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         builder.Property(message => message.Status).ConfigureEnum();
         builder.Property(message => message.LockedUntil).HasPrecision(7);
         builder.HasIndex(message => new { message.Status, message.NextRetryAt, message.OccurredAt });
-        builder.HasIndex(message => new { message.LockId, message.LockedUntil })
-            .HasFilter("[LockId] IS NOT NULL");
+        builder.HasIndex(message => new { message.LockId, message.LockedUntil }).HasFilter("[LockId] IS NOT NULL");
     }
 }
 
@@ -77,10 +76,7 @@ internal sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.HasIndex(log => new { log.EntityType, log.EntityId, log.OccurredAt });
         builder.HasIndex(log => new { log.ActorUserId, log.OccurredAt });
         builder.HasIndex(log => log.CorrelationId);
-        builder.HasOne<ApplicationUser>()
-            .WithMany()
-            .HasForeignKey(log => log.ActorUserId)
-            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<ApplicationUser>().WithMany().HasForeignKey(log => log.ActorUserId).OnDelete(DeleteBehavior.NoAction);
     }
 }
 
@@ -90,9 +86,7 @@ internal sealed class SystemSettingConfiguration : IEntityTypeConfiguration<Syst
     {
         builder.ToTable("SystemSettings", DatabaseSchemas.Configuration, table =>
         {
-            table.HasCheckConstraint(
-                "CK_SystemSettings_ValueSource",
-                "([Value] IS NOT NULL AND [SecretReference] IS NULL) OR ([Value] IS NULL AND [SecretReference] IS NOT NULL)");
+            table.HasCheckConstraint("CK_SystemSettings_ValueSource", "([Value] IS NOT NULL AND [SecretReference] IS NULL) OR ([Value] IS NULL AND [SecretReference] IS NOT NULL)");
         });
         builder.ConfigureAuditable();
         builder.Property(setting => setting.Key).HasMaxLength(200).IsUnicode(false).IsRequired();
@@ -111,13 +105,9 @@ internal sealed class IdempotencyRecordConfiguration : IEntityTypeConfiguration<
     {
         builder.ToTable("IdempotencyRecords", DatabaseSchemas.Platform, table =>
         {
-            table.HasCheckConstraint(
-                "CK_IdempotencyRecords_Status",
-                "[Status] IN ('Processing', 'Completed', 'Failed')");
-            table.HasCheckConstraint("CK_IdempotencyRecords_Expiry", "[ExpiresAt] > [CreatedAt]");
-            table.HasCheckConstraint(
-                "CK_IdempotencyRecords_ResponseCode",
-                "[ResponseStatusCode] IS NULL OR [ResponseStatusCode] BETWEEN 100 AND 599");
+            table.HasCheckConstraint("CK_IdempotencyRecords_Status", "[Status] IN ('Processing', 'Completed', 'Failed')");
+            builder.HasCheckConstraint("CK_IdempotencyRecords_Expiry", "[ExpiresAt] > [CreatedAt]");
+            builder.HasCheckConstraint("CK_IdempotencyRecords_ResponseCode", "[ResponseStatusCode] IS NULL OR [ResponseStatusCode] BETWEEN 100 AND 599");
         });
         builder.ConfigureAuditable();
         builder.Property(record => record.Scope).HasMaxLength(200).IsUnicode(false).IsRequired();
