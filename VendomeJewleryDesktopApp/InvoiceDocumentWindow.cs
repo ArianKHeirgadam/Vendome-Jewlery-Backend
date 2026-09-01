@@ -32,7 +32,7 @@ internal sealed class InvoiceDocumentWindow : Window
     {
         Owner = owner;
         _environment = environment;
-        _html = html;
+        _html = ApplyInvoicePrintTypography(html);
         _suggestedFileName = SanitizeFileName(suggestedFileName);
 
         Title = "پیش‌نمایش فاکتور وندوم";
@@ -247,6 +247,146 @@ internal sealed class InvoiceDocumentWindow : Window
         {
             throw new InvalidOperationException("The invoice preview is not ready.");
         }
+    }
+
+    private static string ApplyInvoicePrintTypography(string html)
+    {
+        const string printTypography = @"
+<style id=""vendome-invoice-print-typography"">
+  /* IranSans is preferred for the invoice; Windows-local variants cover common installations. */
+  html, body {
+    font-family: ""IRANSans"", ""IRANSansWeb"", ""IRANSansX"", Tahoma, ""Segoe UI"", sans-serif !important;
+    font-size: 9.5px !important;
+    line-height: 1.6 !important;
+    text-rendering: optimizeLegibility;
+  }
+
+  .sheet,
+  .header,
+  .party-grid,
+  .party-card,
+  .info-list,
+  .info-item,
+  .document-strip,
+  .document-strip > div,
+  .summary,
+  .notes,
+  .totals,
+  .total-row,
+  .signatures,
+  .signature,
+  .footer {
+    min-width: 0 !important;
+  }
+
+  .invoice-meta,
+  .party-card,
+  .info-item,
+  .info-item strong,
+  .document-strip > div,
+  .document-strip strong,
+  .invoice-number,
+  .invoice-date,
+  .status,
+  th,
+  td,
+  .product-cell,
+  .product-cell strong,
+  .product-cell span,
+  .product-cell small,
+  .money-cell,
+  .notes,
+  .notes p,
+  .total-row span,
+  .total-row strong,
+  .footer > div {
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+    min-width: 0 !important;
+  }
+
+  .party-card,
+  .document-strip > div,
+  .totals,
+  .notes {
+    overflow: hidden;
+  }
+
+  .invoice-meta h2 {
+    font-size: 16px !important;
+  }
+
+  .invoice-number {
+    font-size: 11px !important;
+    white-space: normal !important;
+  }
+
+  .info-item strong {
+    font-size: 8.6px !important;
+    line-height: 1.6 !important;
+  }
+
+  .document-strip strong {
+    font-size: 8.5px !important;
+    line-height: 1.55 !important;
+  }
+
+  th {
+    font-size: 7.25px !important;
+    line-height: 1.35 !important;
+  }
+
+  td {
+    font-size: 7.7px !important;
+    line-height: 1.5 !important;
+  }
+
+  .product-cell strong {
+    font-size: 8.1px !important;
+    line-height: 1.45 !important;
+  }
+
+  .product-cell span {
+    font-size: 7.1px !important;
+    line-height: 1.4 !important;
+  }
+
+  .product-cell small {
+    font-size: 6.5px !important;
+    line-height: 1.3 !important;
+  }
+
+  .money-cell,
+  .total-row strong {
+    white-space: normal !important;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .total-row span,
+  .total-row strong {
+    line-height: 1.5 !important;
+  }
+
+  .total-row.grand strong {
+    font-size: 10.5px !important;
+  }
+
+  .notes p {
+    line-height: 1.75 !important;
+  }
+
+  .footer {
+    align-items: start !important;
+  }
+</style>"";
+
+        const headClose = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+        if (headClose < 0)
+        {
+            return printTypography + html;
+        }
+
+        return html.Insert(headClose, printTypography);
     }
 
     private static string SanitizeFileName(string value)
