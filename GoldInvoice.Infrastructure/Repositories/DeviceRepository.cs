@@ -1,4 +1,5 @@
 using GoldInvoice.Domain.Platform;
+using GoldInvoice.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace GoldInvoice.Infrastructure.Repositories;
