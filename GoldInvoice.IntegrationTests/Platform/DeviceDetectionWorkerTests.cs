@@ -1,104 +1,110 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Moq;
 using Xunit;
 using GoldInvoice.Domain.Platform;
-using GoldInvoice.Infrastructure.Repositories;
 using GoldInvoice.Worker;
-using System.Threading;
-using System.Threading.Tasks;
 
-namespace GoldInvoice.IntegrationTests.Platform
+namespace GoldInvoice.IntegrationTests.Platform;
+
+public class DeviceDetectionWorkerTests
 {
-    public class DeviceDetectionWorkerTests
+    [Fact]
+    public async Task DeviceDetectionWorker_RegistersDevices_WhenDevicesAreDetected()
     {
-        [Fact]
-        public async Task DeviceDetectionWorker_RegistersDevices_WhenDevicesAreDetected()
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IDeviceRepository, MockDeviceRepository>();
+        services.AddSingleton<IPrinterDiscoveryService, MockPrinterDiscoveryService>();
+        services.AddSingleton<IScannerDiscoveryService, MockScannerDiscoveryService>();
+        services.AddSingleton<IHubContext<DeviceHub>, MockHubContext>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+
+        var worker = new DeviceDetectionWorker(
+            serviceProvider.GetRequiredService<ILogger<DeviceDetectionWorker>>(),
+            serviceProvider.GetRequiredService<IPrinterDiscoveryService>(),
+            serviceProvider.GetRequiredService<IScannerDiscoveryService>(),
+            serviceProvider.GetRequiredService<IDeviceRepository>(),
+            serviceProvider.GetRequiredService<IHubContext<DeviceHub>>());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+
+        await worker.StartAsync(cts.Token);
+        try
         {
-            // Arrange
-            var services = new ServiceCollection();
-            services.AddLogging();
-            services.AddSingleton<IDeviceRepository, DeviceRepository>();
-            services.AddSingleton<IPrinterDiscoveryService, MockPrinterDiscoveryService>();
-            services.AddSingleton<IScannerDiscoveryService, MockScannerDiscoveryService>();
-            services.AddSingleton<IHubContext<DeviceHub>, MockHubContext>();
-
-            var serviceProvider = services.BuildServiceProvider();
-            var worker = new DeviceDetectionWorker(
-                serviceProvider.GetRequiredService<ILogger<DeviceDetectionWorker>>(),
-                serviceProvider.GetRequiredService<IPrinterDiscoveryService>(),
-                serviceProvider.GetRequiredService<IScannerDiscoveryService>(),
-                serviceProvider.GetRequiredService<IDeviceRepository>(),
-                serviceProvider.GetRequiredService<IHubContext<DeviceHub>>());
-
-            // Act
-            using var cts = new CancellationTokenSource();
-            await worker.StartAsync(cts.Token);
-            await Task.Delay(1000);
-            cts.Cancel();
+            await Task.Delay(50, CancellationToken.None);
+        }
+        finally
+        {
             await worker.StopAsync(CancellationToken.None);
-
-            // Assert
-            // Verify that devices were registered and notifications were sent.
         }
+
+        var repository = (MockDeviceRepository)serviceProvider.GetRequiredService<IDeviceRepository>();
+        Assert.Equal(2, repository.RegisteredDevices.Count);
+    }
+}
+
+internal sealed class MockDeviceRepository : IDeviceRepository
+{
+    public List<DesktopDevice> RegisteredDevices { get; } = new();
+
+    public Task RegisterOrUpdateDeviceAsync(DesktopDevice device)
+    {
+        RegisteredDevices.Add(device);
+        return Task.CompletedTask;
+    }
+}
+
+internal sealed class MockPrinterDiscoveryService : IPrinterDiscoveryService
+{
+    public Task<List<DesktopDevice>> DiscoverPrintersAsync() =>
+        Task.FromResult(new List<DesktopDevice>
+        {
+            new(Guid.NewGuid(), "printer1", "Printer 1")
+        });
+}
+
+internal sealed class MockScannerDiscoveryService : IScannerDiscoveryService
+{
+    public Task<List<DesktopDevice>> DiscoverScannersAsync() =>
+        Task.FromResult(new List<DesktopDevice>
+        {
+            new(Guid.NewGuid(), "scanner1", "Scanner 1")
+        });
+}
+
+internal sealed class MockHubContext : IHubContext<DeviceHub>
+{
+    public IHubClients Clients { get; } = new MockHubClients();
+    public IGroupManager Groups { get; } = new MockGroupManager();
+
+    private sealed class MockHubClients : IHubClients
+    {
+        public IClientProxy All { get; } = new MockClientProxy();
+        public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => All;
+        public IClientProxy Client(string connectionId) => All;
+        public IClientProxy Clients(IReadOnlyList<string> connectionIds) => All;
+        public IClientProxy Group(string groupName) => All;
+        public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => All;
+        public IClientProxy Groups(IReadOnlyList<string> groupNames) => All;
+        public IClientProxy OthersInGroup(string connectionId, string groupName) => All;
+        public IClientProxy User(string userId) => All;
+        public IClientProxy Users(IReadOnlyList<string> userIds) => All;
     }
 
-    public class MockPrinterDiscoveryService : IPrinterDiscoveryService
+    private sealed class MockClientProxy : IClientProxy
     {
-        public Task<List<DesktopDevice>> DiscoverPrintersAsync()
-        {
-            return Task.FromResult(new List<DesktopDevice>
-            {
-                new DesktopDevice(Guid.NewGuid(), "printer1", "Printer 1")
-            });
-        }
+        public Task SendCoreAsync(string method, object?[]? args, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
-    public class MockScannerDiscoveryService : IScannerDiscoveryService
+    private sealed class MockGroupManager : IGroupManager
     {
-        public Task<List<DesktopDevice>> DiscoverScannersAsync()
-        {
-            return Task.FromResult(new List<DesktopDevice>
-            {
-                new DesktopDevice(Guid.NewGuid(), "scanner1", "Scanner 1")
-            });
-        }
-    }
+        public Task AddToGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
 
-    public class MockHubContext : IHubContext<DeviceHub>
-    {
-        public IHubClients Clients => new MockHubClients();
-        public IGroupManager Groups => new MockGroupManager();
-
-        public class MockHubClients : IHubClients
-        {
-            public IClientProxy All => new MockClientProxy();
-            public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new NotImplementedException();
-            public IClientProxy Client(string connectionId) => throw new NotImplementedException();
-            public IClientProxy Clients(IReadOnlyList<string> connectionIds) => throw new NotImplementedException();
-            public IClientProxy Group(string groupName) => throw new NotImplementedException();
-            public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new NotImplementedException();
-            public IClientProxy Groups(IReadOnlyList<string> groupNames) => throw new NotImplementedException();
-            public IClientProxy OthersInGroup(string connectionId, string groupName) => throw new NotImplementedException();
-            public IClientProxy User(string userId) => throw new NotImplementedException();
-            public IClientProxy Users(IReadOnlyList<string> userIds) => throw new NotImplementedException();
-        }
-
-        public class MockClientProxy : IClientProxy
-        {
-            public Task SendCoreAsync(string method, object?[]? args, CancellationToken cancellationToken = default)
-                => Task.CompletedTask;
-        }
-
-        public class MockGroupManager : IGroupManager
-        {
-            public Task AddToGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
-                => Task.CompletedTask;
-
-            public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
-                => Task.CompletedTask;
-        }
+        public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 }
