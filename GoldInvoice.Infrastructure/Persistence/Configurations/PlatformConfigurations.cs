@@ -11,9 +11,8 @@ internal sealed class DesktopDeviceConfiguration : IEntityTypeConfiguration<Desk
     {
         builder.ToTable("DesktopDevices", DatabaseSchemas.Devices, table =>
         {
-            table.HasCheckConstraint(
-                "CK_DesktopDevices_Revocation",
-                "([IsActive] = 1 AND [RevokedAt] IS NULL) OR ([IsActive] = 0 AND [RevokedAt] IS NOT NULL)");
+            table.HasCheckConstraint("CK_DesktopDevices_Revocation", "([IsActive] = 1 AND [RevokedAt] IS NULL) OR ([IsActive] = 0 AND [RevokedAt] IS NOT NULL)");
+            table.HasCheckConstraint("CK_DesktopDevices_Type", "[DeviceType] IN ('Unknown', 'Printer', 'Scanner')");
         });
         builder.ConfigureAuditable();
         builder.Property(device => device.DeviceIdentifierHash).HasMaxLength(128).IsUnicode(false).IsRequired();
@@ -28,10 +27,7 @@ internal sealed class DesktopDeviceConfiguration : IEntityTypeConfiguration<Desk
         builder.HasIndex(device => device.DeviceIdentifierHash).IsUnique();
         builder.HasIndex(device => new { device.IsActive, device.LastSeenAt });
         builder.HasIndex(device => new { device.RegisteredByUserId, device.DeviceType, device.IsOnline });
-        builder.HasOne<ApplicationUser>()
-            .WithMany()
-            .HasForeignKey(device => device.RegisteredByUserId)
-            .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<ApplicationUser>().WithMany().HasForeignKey(device => device.RegisteredByUserId).OnDelete(DeleteBehavior.NoAction);
     }
 }
 
@@ -106,8 +102,8 @@ internal sealed class IdempotencyRecordConfiguration : IEntityTypeConfiguration<
         builder.ToTable("IdempotencyRecords", DatabaseSchemas.Platform, table =>
         {
             table.HasCheckConstraint("CK_IdempotencyRecords_Status", "[Status] IN ('Processing', 'Completed', 'Failed')");
-            builder.HasCheckConstraint("CK_IdempotencyRecords_Expiry", "[ExpiresAt] > [CreatedAt]");
-            builder.HasCheckConstraint("CK_IdempotencyRecords_ResponseCode", "[ResponseStatusCode] IS NULL OR [ResponseStatusCode] BETWEEN 100 AND 599");
+            table.HasCheckConstraint("CK_IdempotencyRecords_Expiry", "[ExpiresAt] > [CreatedAt]");
+            table.HasCheckConstraint("CK_IdempotencyRecords_ResponseCode", "[ResponseStatusCode] IS NULL OR [ResponseStatusCode] BETWEEN 100 AND 599");
         });
         builder.ConfigureAuditable();
         builder.Property(record => record.Scope).HasMaxLength(200).IsUnicode(false).IsRequired();
