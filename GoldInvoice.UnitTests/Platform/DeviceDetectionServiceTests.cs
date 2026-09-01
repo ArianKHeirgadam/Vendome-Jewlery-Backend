@@ -51,7 +51,7 @@ namespace GoldInvoice.UnitTests.Platform
             var mockPrinterService = new Mock<IPrinterDiscoveryService>();
             var mockPrinters = new List<DesktopDevice>
             {
-                new DesktopDevice(Guid.NewGuid(), "printer1", "Printer 1", DeviceType.Printer, true)
+                new DesktopDevice(Guid.NewGuid(), "printer1", "Printer 1")
             };
             mockPrinterService.Setup(s => s.DiscoverPrintersAsync()).ReturnsAsync(mockPrinters);
 
@@ -64,7 +64,7 @@ namespace GoldInvoice.UnitTests.Platform
             // Assert
             Assert.NotNull(printers);
             Assert.Single(printers);
-            Assert.Equal(DeviceType.Printer, printers[0].DeviceType);
+            Assert.Equal("Printer 1", printers[0].DisplayName);
         }
 
         [Fact]
@@ -75,7 +75,7 @@ namespace GoldInvoice.UnitTests.Platform
             var mockScannerService = new Mock<IScannerDiscoveryService>();
             var mockScanners = new List<DesktopDevice>
             {
-                new DesktopDevice(Guid.NewGuid(), "scanner1", "Scanner 1", DeviceType.Scanner, true)
+                new DesktopDevice(Guid.NewGuid(), "scanner1", "Scanner 1")
             };
             mockScannerService.Setup(s => s.DiscoverScannersAsync()).ReturnsAsync(mockScanners);
 
@@ -87,7 +87,7 @@ namespace GoldInvoice.UnitTests.Platform
             // Assert
             Assert.NotNull(scanners);
             Assert.Single(scanners);
-            Assert.Equal(DeviceType.Scanner, scanners[0].DeviceType);
+            Assert.Equal("Scanner 1", scanners[0].DisplayName);
         }
     }
 }
