@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\GoldInvoice.Application\GoldInvoice.Application.csproj" />
     <ProjectReference Include="..\GoldInvoice.Domain\GoldInvoice.Domain.csproj" />
     <ProjectReference Include="..\GoldInvoice.Contracts\GoldInvoice.Contracts.csproj" />
