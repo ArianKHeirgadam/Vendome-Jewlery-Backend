@@ -10,10 +10,7 @@ internal sealed class LocalDeviceDetectionAgent : IDisposable
 {
     private readonly Func<string?> _accessTokenProvider;
     private readonly Func<string> _apiBaseUrlProvider;
-    private readonly HttpClient _httpClient = new()
-    {
-        Timeout = TimeSpan.FromSeconds(20)
-    };
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly CancellationTokenSource _cts = new();
     private Task? _loop;
 
@@ -49,39 +46,28 @@ internal sealed class LocalDeviceDetectionAgent : IDisposable
                 HttpMethod.Post,
                 new Uri(new Uri(apiBaseUrl.TrimEnd('/') + "/", UriKind.Absolute), "api/v1/devices/sync"));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(devices.Select(x => new { x.Identifier, x.DisplayName, x.Model, Type = x.Type.ToString() })),
-                Encoding.UTF8,
-                "application/json");
+            request.Content = new StringContent(JsonSerializer.Serialize(devices), Encoding.UTF8, "application/json");
 
             using var response = await _httpClient.SendAsync(request, cancellationToken);
             _ = await response.Content.ReadAsStringAsync(cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch
-        {
-            // Device polling must never terminate the desktop host.
-        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch { }
     }
 
     private static IEnumerable<DetectedDevice> DiscoverPrinters()
     {
-        using var searcher = new ManagementObjectSearcher(
-            "SELECT Name, DeviceID, DriverName, PortName FROM Win32_Printer");
-
+        using var searcher = new ManagementObjectSearcher("SELECT Name, DeviceID, DriverName, PortName FROM Win32_Printer");
         foreach (ManagementObject printer in searcher.Get())
         {
             var name = printer["Name"]?.ToString();
             var deviceId = printer["DeviceID"]?.ToString();
             if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(deviceId)) continue;
-
             yield return new DetectedDevice(
                 "printer|" + (deviceId ?? name),
                 name ?? deviceId!,
                 printer["DriverName"]?.ToString() ?? printer["PortName"]?.ToString(),
-                Domain.Platform.DeviceType.Printer);
+                "Printer");
         }
     }
 
@@ -89,37 +75,28 @@ internal sealed class LocalDeviceDetectionAgent : IDisposable
     {
         var managerType = Type.GetTypeFromProgID("WIA.DeviceManager", false);
         if (managerType is null) yield break;
-
         object? manager = null;
         try
         {
             manager = Activator.CreateInstance(managerType);
             if (manager is null) yield break;
-
             dynamic infos = ((dynamic)manager).DeviceInfos;
             var count = Convert.ToInt32(infos.Count);
             for (var i = 1; i <= count; i++)
             {
                 dynamic info = infos.Item(i);
-                string? id = TryWiaString(info, "DeviceID");
-                string? name = TryWiaString(info, "Name") ?? TryWiaString(info, "Description");
+                var id = TryWiaString(info, "DeviceID");
+                var name = TryWiaString(info, "Name") ?? TryWiaString(info, "Description");
                 if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(name)) continue;
-
                 yield return new DetectedDevice(
                     "scanner|" + (id ?? name ?? $"wia-{i}"),
                     name ?? id!,
                     TryWiaString(info, "Model") ?? TryWiaString(info, "Manufacturer"),
-                    Domain.Platform.DeviceType.Scanner);
+                    "Scanner");
             }
         }
-        catch (COMException)
-        {
-            yield break;
-        }
-        catch
-        {
-            yield break;
-        }
+        catch (COMException) { yield break; }
+        catch { yield break; }
         finally
         {
             if (manager is not null && Marshal.IsComObject(manager))
@@ -143,9 +120,5 @@ internal sealed class LocalDeviceDetectionAgent : IDisposable
         _cts.Dispose();
     }
 
-    private sealed record DetectedDevice(
-        string Identifier,
-        string DisplayName,
-        string? Model,
-        Domain.Platform.DeviceType Type);
+    private sealed record DetectedDevice(string Identifier, string DisplayName, string? Model, string Type);
 }
