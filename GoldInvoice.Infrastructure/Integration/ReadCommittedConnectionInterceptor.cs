@@ -8,12 +8,12 @@ internal sealed class ReadCommittedConnectionInterceptor : DbConnectionIntercept
     public override async Task ConnectionOpenedAsync(
         DbConnection connection,
         ConnectionEndEventData eventData,
-        InterceptionResult result)
+        CancellationToken cancellationToken = default)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED;";
-        await command.ExecuteNonQueryAsync(CancellationToken.None);
+        await command.ExecuteNonQueryAsync(cancellationToken);
 
-        await base.ConnectionOpenedAsync(connection, eventData, result);
+        await base.ConnectionOpenedAsync(connection, eventData, cancellationToken);
     }
 }
