@@ -1,18 +1,18 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Diagnostics;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System;
 
-namespace GoldInvoice.Api.Controllers
+namespace GoldInvoice.Api.Controllers;
 
 [ApiController]
 [Route("health")]
 public class HealthController : ControllerBase
 {
-    private readonly IDiagnosticListener _diagnosticListener;
+    private readonly HealthCheckService _healthCheckService;
 
-    public HealthController(IDiagnosticListener diagnosticListener)
+    public HealthController(HealthCheckService healthCheckService)
     {
-        _diagnosticListener = diagnosticListener;
+        _healthCheckService = healthCheckService;
     }
 
     [HttpGet("live")]
@@ -25,18 +25,18 @@ public class HealthController : ControllerBase
         {
             status = "healthy",
             timestamp = DateTimeOffset.UtcNow,
-            correlationId = correlationId
+            correlationId
         });
     }
 
     [HttpGet("ready")]
-    public IActionResult GetReady()
+    public async Task<IActionResult> GetReady(CancellationToken cancellationToken)
     {
         var correlationId = HttpContext.TraceIdentifier;
         Response.Headers["X-Correlation-ID"] = correlationId;
 
-        var healthSnapshot = _diagnosticListener.GetCurrentSnapshot();
-        var isReady = healthSnapshot?.GetHealthStatus() == Microsoft.Extensions.Diagnostics.HealthCheck.HealthStatus.Healthy;
+        var healthReport = await _healthCheckService.CheckHealthAsync(cancellationToken);
+        var isReady = healthReport.Status == HealthStatus.Healthy;
 
         if (isReady)
         {
@@ -44,13 +44,15 @@ public class HealthController : ControllerBase
             {
                 status = "ready",
                 timestamp = DateTimeOffset.UtcNow,
-                correlationId = correlationId,
-                details = new
-                {
-                    database = "connected",
-                    cache = "available",
-                    messageBroker = "available"
-                }
+                correlationId,
+                details = healthReport.Entries.ToDictionary(
+                    entry => entry.Key,
+                    entry => new
+                    {
+                        status = entry.Value.Status.ToString(),
+                        description = entry.Value.Description,
+                        durationMs = entry.Value.Duration.TotalMilliseconds
+                    })
             });
         }
 
@@ -62,6 +64,7 @@ public class HealthController : ControllerBase
             Status = StatusCodes.Status503ServiceUnavailable
         };
         problemDetails.Extensions["correlationId"] = correlationId;
+        problemDetails.Extensions["healthStatus"] = healthReport.Status.ToString();
 
         return StatusCode(StatusCodes.Status503ServiceUnavailable, problemDetails);
     }
