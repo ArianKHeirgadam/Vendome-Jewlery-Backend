@@ -108,6 +108,7 @@ public static class DependencyInjection
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddHostedService<OutboxDispatchHostedService>();
+        services.AddHostedService<OutboxSqlDiagnosticHostedService>();
         return services;
     }
 
