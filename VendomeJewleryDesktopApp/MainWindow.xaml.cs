@@ -9,7 +9,7 @@ namespace VendomeJewleryDesktopApp;
 
 public partial class MainWindow : Window
 {
-    private const string AppHostName = "desktop.vendome.invalid";
+    private const string AppHostName = "desktop.zarnom.invalid";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly DesktopSettingsStore _settingsStore;

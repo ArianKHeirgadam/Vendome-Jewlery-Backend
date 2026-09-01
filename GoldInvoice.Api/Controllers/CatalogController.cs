@@ -17,7 +17,7 @@ public sealed class CatalogController(
     IProductImageService productImageService) : ControllerBase
 {
     [Authorize(Policy = SecurityPermissions.ProductsRead)]
-    [HttpGet("categories")]
+    [HttpGet("zarnom-categories")]
     public async Task<ActionResult<IReadOnlyList<ProductCategoryResponse>>> GetCategories(
         [FromQuery] bool includeInactive,
         CancellationToken cancellationToken) =>
@@ -80,7 +80,7 @@ public sealed class CatalogController(
     [HttpGet("products")]
     public async Task<ActionResult<PagedResponse<ProductResponse>>> GetProducts(
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
+        [FromQuery] int pageSize = 100,
         [FromQuery] Guid? categoryId = null,
         [FromQuery] bool includeInactive = false,
         CancellationToken cancellationToken = default)
