@@ -20,7 +20,11 @@ public class DeviceRepository : IDeviceRepository
 
         if (existingDevice != null)
         {
-            existingDevice.Refresh(device.DisplayName, DateTimeOffset.UtcNow);
+            existingDevice.Refresh(
+                device.DisplayName,
+                device.DeviceType,
+                device.Model,
+                DateTimeOffset.UtcNow);
         }
         else
         {
