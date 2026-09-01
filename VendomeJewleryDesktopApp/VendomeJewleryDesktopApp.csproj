@@ -15,53 +15,23 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 
-  <!--
-    A checked dist directory lets F5 work offline. If npm ci has already been
-    run, Visual Studio rebuilds the one shared React client before WPF builds.
-
-    Do not declare dist as an evaluation-time Content wildcard. Vite replaces
-    hashed asset names during every build, so an early wildcard can leave
-    MSBuild holding paths that no longer exist. The targets below collect the
-    completed dist output at execution time instead.
-  -->
-  <Target Name="BuildReactClient"
-          BeforeTargets="PrepareForBuild"
-          Condition="'$(DesignTimeBuild)' != 'true' and Exists('$(ReactClientRoot)node_modules')">
+  <Target Name="BuildReactClient" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true' and Exists('$(ReactClientRoot)node_modules')">
     <Exec WorkingDirectory="$(ReactClientRoot)" Command="npm run build" />
   </Target>
 
-  <Target Name="CopyReactClientToOutput"
-          AfterTargets="CopyFilesToOutputDirectory"
-          Condition="'$(DesignTimeBuild)' != 'true'">
-    <ItemGroup>
-      <ReactDistFiles Include="$(ReactClientRoot)dist\**\*" />
-    </ItemGroup>
-    <Error Condition="'@(ReactDistFiles)' == ''"
-           Text="The React production output was not found. Run 'npm --prefix GoldInvoice.Client run build' and build again." />
-    <Copy SourceFiles="@(ReactDistFiles)"
-          DestinationFiles="@(ReactDistFiles->'$(OutDir)ClientApp\dist\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+  <Target Name="CopyReactClientToOutput" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(DesignTimeBuild)' != 'true'">
+    <ItemGroup><ReactDistFiles Include="$(ReactClientRoot)dist\**\*" /></ItemGroup>
+    <Error Condition="'@(ReactDistFiles)' == ''" Text="The React production output was not found. Run 'npm --prefix GoldInvoice.Client run build' and build again." />
+    <Copy SourceFiles="@(ReactDistFiles)" DestinationFiles="@(ReactDistFiles->'$(OutDir)ClientApp\dist\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
-  <!--
-    Copy the client after the SDK has completed its publish conflict analysis.
-    CopyReactClientToOutput already places the same files under bin for normal
-    runs; adding dist to ResolvedFileToPublish as well makes newer SDKs report
-    NETSDK1152 for duplicate ClientApp/dist relative paths.
-  -->
-  <Target Name="CopyReactClientToPublish"
-          AfterTargets="Publish"
-          Condition="'$(DesignTimeBuild)' != 'true'">
-    <ItemGroup>
-      <ReactPublishFiles Include="$(ReactClientRoot)dist\**\*" />
-    </ItemGroup>
-    <Error Condition="'@(ReactPublishFiles)' == ''"
-           Text="The React production output was not found. Run 'npm --prefix GoldInvoice.Client run build' and publish again." />
-    <Copy SourceFiles="@(ReactPublishFiles)"
-          DestinationFiles="@(ReactPublishFiles->'$(PublishDir)ClientApp\dist\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+  <Target Name="CopyReactClientToPublish" AfterTargets="Publish" Condition="'$(DesignTimeBuild)' != 'true'">
+    <ItemGroup><ReactPublishFiles Include="$(ReactClientRoot)dist\**\*" /></ItemGroup>
+    <Error Condition="'@(ReactPublishFiles)' == ''" Text="The React production output was not found. Run 'npm --prefix GoldInvoice.Client run build' and publish again." />
+    <Copy SourceFiles="@(ReactPublishFiles)" DestinationFiles="@(ReactPublishFiles->'$(PublishDir)ClientApp\dist\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>
