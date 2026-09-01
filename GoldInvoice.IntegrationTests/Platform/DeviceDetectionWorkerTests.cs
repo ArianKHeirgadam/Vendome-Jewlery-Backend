@@ -34,13 +34,14 @@ namespace GoldInvoice.IntegrationTests.Platform
                 serviceProvider.GetRequiredService<IHubContext<DeviceHub>>());
 
             // Act
-            var cts = new CancellationTokenSource();
+            using var cts = new CancellationTokenSource();
             await worker.StartAsync(cts.Token);
-            await Task.Delay(1000); // Wait for the worker to run
-            await worker.StopAsync(cts.Token);
+            await Task.Delay(1000);
+            cts.Cancel();
+            await worker.StopAsync(CancellationToken.None);
 
             // Assert
-            // Verify that devices were registered and notifications were sent
+            // Verify that devices were registered and notifications were sent.
         }
     }
 
@@ -50,7 +51,7 @@ namespace GoldInvoice.IntegrationTests.Platform
         {
             return Task.FromResult(new List<DesktopDevice>
             {
-                new DesktopDevice(Guid.NewGuid(), "printer1", "Printer 1", DeviceType.Printer, true)
+                new DesktopDevice(Guid.NewGuid(), "printer1", "Printer 1")
             });
         }
     }
@@ -61,7 +62,7 @@ namespace GoldInvoice.IntegrationTests.Platform
         {
             return Task.FromResult(new List<DesktopDevice>
             {
-                new DesktopDevice(Guid.NewGuid(), "scanner1", "Scanner 1", DeviceType.Scanner, true)
+                new DesktopDevice(Guid.NewGuid(), "scanner1", "Scanner 1")
             });
         }
     }
@@ -69,29 +70,35 @@ namespace GoldInvoice.IntegrationTests.Platform
     public class MockHubContext : IHubContext<DeviceHub>
     {
         public IHubClients Clients => new MockHubClients();
-        public Groups Groups => throw new System.NotImplementedException();
+        public IGroupManager Groups => new MockGroupManager();
 
         public class MockHubClients : IHubClients
         {
             public IClientProxy All => new MockClientProxy();
-            public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new System.NotImplementedException();
-            public IClientProxy Client(string connectionId) => throw new System.NotImplementedException();
-            public IClientProxy Clients(IReadOnlyList<string> connectionIds) => throw new System.NotImplementedException();
-            public IClientProxy Group(string groupName) => throw new System.NotImplementedException();
-            public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new System.NotImplementedException();
-            public IClientProxy Groups(IReadOnlyList<string> groupNames) => throw new System.NotImplementedException();
-            public IClientProxy OthersInGroup(string connectionId, string groupName) => throw new System.NotImplementedException();
-            public IClientProxy User(string userId) => throw new System.NotImplementedException();
-            public IClientProxy Users(IReadOnlyList<string> userIds) => throw new System.NotImplementedException();
+            public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new NotImplementedException();
+            public IClientProxy Client(string connectionId) => throw new NotImplementedException();
+            public IClientProxy Clients(IReadOnlyList<string> connectionIds) => throw new NotImplementedException();
+            public IClientProxy Group(string groupName) => throw new NotImplementedException();
+            public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new NotImplementedException();
+            public IClientProxy Groups(IReadOnlyList<string> groupNames) => throw new NotImplementedException();
+            public IClientProxy OthersInGroup(string connectionId, string groupName) => throw new NotImplementedException();
+            public IClientProxy User(string userId) => throw new NotImplementedException();
+            public IClientProxy Users(IReadOnlyList<string> userIds) => throw new NotImplementedException();
         }
 
         public class MockClientProxy : IClientProxy
         {
             public Task SendCoreAsync(string method, object?[]? args, CancellationToken cancellationToken = default)
-            {
-                // Verify that the method was called with the correct arguments
-                return Task.CompletedTask;
-            }
+                => Task.CompletedTask;
+        }
+
+        public class MockGroupManager : IGroupManager
+        {
+            public Task AddToGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
+                => Task.CompletedTask;
+
+            public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
+                => Task.CompletedTask;
         }
     }
 }
