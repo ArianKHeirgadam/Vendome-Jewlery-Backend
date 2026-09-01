@@ -75,12 +75,15 @@ internal sealed class LocalDeviceDetectionAgent : IDisposable
     private static IEnumerable<DetectedDevice> DiscoverScanners()
     {
         var managerType = Type.GetTypeFromProgID("WIA.DeviceManager", false);
-        if (managerType is null) yield break;
+        if (managerType is null) return Array.Empty<DetectedDevice>();
+
         object? manager = null;
         try
         {
             manager = Activator.CreateInstance(managerType);
-            if (manager is null) yield break;
+            if (manager is null) return Array.Empty<DetectedDevice>();
+
+            var discovered = new List<DetectedDevice>();
             dynamic infos = ((dynamic)manager).DeviceInfos;
             var count = Convert.ToInt32(infos.Count);
             for (var i = 1; i <= count; i++)
@@ -89,15 +92,24 @@ internal sealed class LocalDeviceDetectionAgent : IDisposable
                 var id = TryWiaString(info, "DeviceID");
                 var name = TryWiaString(info, "Name") ?? TryWiaString(info, "Description");
                 if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(name)) continue;
-                yield return new DetectedDevice(
+
+                discovered.Add(new DetectedDevice(
                     "scanner|" + (id ?? name ?? $"wia-{i}"),
                     name ?? id!,
                     TryWiaString(info, "Model") ?? TryWiaString(info, "Manufacturer"),
-                    "Scanner");
+                    "Scanner"));
             }
+
+            return discovered;
         }
-        catch (COMException) { yield break; }
-        catch { yield break; }
+        catch (COMException)
+        {
+            return Array.Empty<DetectedDevice>();
+        }
+        catch
+        {
+            return Array.Empty<DetectedDevice>();
+        }
         finally
         {
             if (manager is not null && Marshal.IsComObject(manager))
