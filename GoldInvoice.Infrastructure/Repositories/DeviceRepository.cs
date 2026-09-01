@@ -15,15 +15,12 @@ public class DeviceRepository : IDeviceRepository
 
     public async Task RegisterOrUpdateDeviceAsync(DesktopDevice device)
     {
-        var existingDevice = await _context.DesktopDevices.FirstOrDefaultAsync(d => d.DeviceIdentifierHash == device.DeviceIdentifierHash);
+        var existingDevice = await _context.DesktopDevices
+            .FirstOrDefaultAsync(d => d.DeviceIdentifierHash == device.DeviceIdentifierHash);
 
         if (existingDevice != null)
         {
-            existingDevice.DisplayName = device.DisplayName;
-            existingDevice.DeviceType = device.DeviceType;
-            existingDevice.IsOnline = device.IsOnline;
-            existingDevice.LastSeenAt = DateTimeOffset.UtcNow;
-            _context.DesktopDevices.Update(existingDevice);
+            existingDevice.Refresh(device.DisplayName, DateTimeOffset.UtcNow);
         }
         else
         {
