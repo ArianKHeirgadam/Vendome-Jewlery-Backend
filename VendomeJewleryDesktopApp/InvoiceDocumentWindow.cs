@@ -378,9 +378,9 @@ internal sealed class InvoiceDocumentWindow : Window
   .footer {
     align-items: start !important;
   }
-</style>"";
+</style>";
 
-        const headClose = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+        var headClose = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
         if (headClose < 0)
         {
             return printTypography + html;

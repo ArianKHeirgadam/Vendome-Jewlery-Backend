@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -89,7 +90,11 @@ internal sealed class DesktopAuthBroker : IDisposable
         }
         catch (DesktopBridgeException) { throw; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new DesktopBridgeException("api_timeout", "پاسخ API بیش از حد طول کشید. وضعیت سرور را بررسی کن.", 504); }
-        catch (HttpRequestException) { throw new DesktopBridgeException("api_unreachable", "ارتباط با API برقرار نشد. آدرس و گواهی سرور را بررسی کن.", 503); }
+        catch (HttpRequestException ex)
+        {
+            MessageBox.Show(ex.ToString(), "DEBUG - HttpRequestException", MessageBoxButton.OK, MessageBoxImage.Error);
+            throw new DesktopBridgeException("api_unreachable", "ارتباط با API برقرار نشد. آدرس و گواهی سرور را بررسی کن.", 503);
+        }
         catch (JsonException) { throw new DesktopBridgeException("invalid_api_response", "پاسخ احراز هویت سرور معتبر نیست.", 502); }
     }
 
