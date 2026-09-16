@@ -14,6 +14,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: GoldInvoice.Client/package-lock.json
+
+      - name: Install React dependencies
+        run: npm ci --prefix GoldInvoice.Client
+
+      - name: Build React client
+        run: npm run build --prefix GoldInvoice.Client
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
