@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Web;
 
 namespace GoldInvoice.PrintAgent;
 
