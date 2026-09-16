@@ -1,0 +1,1 @@
+Before physical release, run the agent against a real enrolled Windows device and verify successful print, wrong/unavailable printer handling, offline handling, out-of-paper handling, paper-jam handling, configured paper size, orientation, color mode, margins, and copy count. Confirm backend records the final outcome and retry behavior does not duplicate an accepted job.
