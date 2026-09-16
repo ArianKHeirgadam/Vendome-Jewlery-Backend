@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -23,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\GoldInvoice.Application\GoldInvoice.Application.csproj" />
     <ProjectReference Include="..\GoldInvoice.Domain\GoldInvoice.Domain.csproj" />
+    <ProjectReference Include="..\GoldInvoice.PrintAgent\GoldInvoice.PrintAgent.csproj" />
   </ItemGroup>
 
   <ItemGroup>
