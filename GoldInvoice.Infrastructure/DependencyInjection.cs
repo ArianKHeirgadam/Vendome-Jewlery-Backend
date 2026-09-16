@@ -59,6 +59,7 @@ public static class DependencyInjection
         services.TryAddSingleton(TimeProvider.System);
         services.AddHttpContextAccessor();
         services.AddScoped<AuditingSaveChangesInterceptor>();
+        services.AddSingleton<ReadCommittedConnectionInterceptor>();
         services.AddDbContext<GoldInvoiceDbContext>((serviceProvider, options) =>
         {
             var databaseOptions = serviceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
@@ -69,7 +70,9 @@ public static class DependencyInjection
             });
             options.EnableDetailedErrors(databaseOptions.EnableDetailedErrors);
             options.EnableSensitiveDataLogging(false);
-            options.AddInterceptors(serviceProvider.GetRequiredService<AuditingSaveChangesInterceptor>());
+            options.AddInterceptors(
+                serviceProvider.GetRequiredService<AuditingSaveChangesInterceptor>(),
+                serviceProvider.GetRequiredService<ReadCommittedConnectionInterceptor>());
         });
 
         services.AddHealthChecks().AddDbContextCheck<GoldInvoiceDbContext>(name: "database", tags: ["ready"]);
@@ -108,6 +111,7 @@ public static class DependencyInjection
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddHostedService<OutboxDispatchHostedService>();
+        services.AddHostedService<OutboxSqlDiagnosticHostedService>();
         return services;
     }
 
