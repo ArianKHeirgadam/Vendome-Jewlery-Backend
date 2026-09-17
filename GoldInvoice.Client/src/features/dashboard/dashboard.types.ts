@@ -51,6 +51,7 @@ export interface TransactionItem {
   customer: string;
   detail: string;
   amount: string;
+  status: string;
   positive: boolean;
 }
 
@@ -65,6 +66,7 @@ export interface DashboardSnapshot {
   profile: ProfileSummary;
   quickOperations: QuickOperation[];
   metrics: PerformanceMetric[];
+  customerSuggestions: string[];
   market: {
     updatedAt: string;
     goldPrices: MarketQuote[];
