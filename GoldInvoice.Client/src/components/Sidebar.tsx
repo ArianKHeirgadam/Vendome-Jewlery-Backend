@@ -7,9 +7,11 @@ import {
   Gem,
   IdCard,
   LayoutDashboard,
+  Plus,
   Settings,
   ShoppingBag,
   Truck,
+  UserRoundPlus,
   Users,
   X,
 } from "lucide-react";
@@ -41,24 +43,55 @@ const navItems: NavItem[] = [
   { label: "تنظیمات", path: "/settings", icon: Settings },
 ];
 
+const dashboardNavItems: NavItem[] = [
+  { label: "Dashboard", path: "/", icon: LayoutDashboard },
+  { label: "Invoices", path: "/invoices", icon: FileText },
+  { label: "Customers", path: "/customers", icon: Users },
+  { label: "Settings", path: "/settings", icon: Settings },
+];
+
 export function Sidebar({
   currentPath,
   isOpen,
   onNavigate,
   onClose,
 }: SidebarProps) {
+  const isDashboard = currentPath === "/" || currentPath === "/dashboard";
+  const items = isDashboard ? dashboardNavItems : navItems;
+
   return (
     <aside className={`sidebar ${isOpen ? "sidebar--open" : ""}`}>
+      {isDashboard && (
+        <div className="dashboard-sidebar-brand">
+          <strong>zarn</strong>
+          <span>INVOICING &amp; ACCOUNTS</span>
+          <div className="dashboard-sidebar-shortcuts">
+            <small>SPEED SHORTCUTS</small>
+            <button type="button" onClick={() => onNavigate("/orders/new")}>
+              <Plus size={16} />
+              <span>+ New Invoice</span>
+              <kbd>F1</kbd>
+            </button>
+            <button type="button" onClick={() => onNavigate("/customers") }>
+              <UserRoundPlus size={16} />
+              <span>+ New Customer</span>
+              <kbd>F2</kbd>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="sidebar-mobile-heading">
-        <span>بخش‌ها</span>
-        <button type="button" aria-label="بستن منو" onClick={onClose}>
+        <span>Sections</span>
+        <button type="button" aria-label="Close menu" onClick={onClose}>
           <X size={20} />
         </button>
       </div>
-      <nav aria-label="بخش‌ها">
-        <p className="sidebar-label">بخش‌ها</p>
+
+      <nav aria-label={isDashboard ? "Dashboard navigation" : "Sections"}>
+        {!isDashboard && <p className="sidebar-label">بخش‌ها</p>}
         <div className="nav-list">
-          {navItems.map((item) => {
+          {items.map((item) => {
             const Icon = item.icon;
             const basePath = currentPath.split("?")[0];
             const active = item.path === "/"
@@ -82,10 +115,13 @@ export function Sidebar({
           })}
         </div>
       </nav>
-      <footer className="sidebar-footer">
-        <p>مِزون وندوم · میدان وندوم، پاریس</p>
-        <span>نسخه ۲.۴</span>
-      </footer>
+
+      {!isDashboard && (
+        <footer className="sidebar-footer">
+          <p>مِزون وندوم · میدان وندوم، پاریس</p>
+          <span>نسخه ۲.۴</span>
+        </footer>
+      )}
     </aside>
   );
 }
