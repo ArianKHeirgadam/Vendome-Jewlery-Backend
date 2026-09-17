@@ -9,7 +9,6 @@ interface DashboardPageProps {
 export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
   const quotes = snapshot.market.goldPrices.slice(0, 2);
   const recent = snapshot.transactions.slice(0, 3);
-  const customerNames = recent.map((item) => item.customer);
 
   return (
     <main className="dashboard-lovable" dir="ltr">
@@ -36,11 +35,7 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
         </span>
       </section>
 
-      <button
-        className="dashboard-new-invoice"
-        type="button"
-        onClick={() => onNavigate("/orders/new")}
-      >
+      <button className="dashboard-new-invoice" type="button" onClick={() => onNavigate("/orders/new")}>
         New Invoice Form
       </button>
 
@@ -67,7 +62,7 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
               aria-label="Search customer"
             />
             <datalist id="dashboard-customers">
-              {customerNames.map((name) => <option value={name} key={name} />)}
+              {snapshot.customerSuggestions.map((name) => <option value={name} key={name} />)}
             </datalist>
           </label>
           <div className="dashboard-autofill-note">
@@ -91,13 +86,13 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
           </div>
           {recent.length ? recent.map((transaction) => (
             <div className="dashboard-table-row" key={transaction.id}>
-              <span className="numeric">{transaction.id.slice(0, 8).toUpperCase()}</span>
+              <span className="numeric">{transaction.id}</span>
               <strong>{transaction.customer}</strong>
               <span>{transaction.detail}</span>
               <span className="numeric">{transaction.amount}</span>
               <span>
-                <em className={`dashboard-status ${transaction.positive ? "is-paid" : "is-overdue"}`}>
-                  {transaction.positive ? "Paid" : "Overdue"}
+                <em className={`dashboard-status ${transaction.status === "Paid" ? "is-paid" : transaction.status === "Overdue" ? "is-overdue" : ""}`}>
+                  {transaction.status}
                 </em>
               </span>
             </div>
@@ -107,11 +102,7 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
         </div>
       </section>
 
-      <button
-        className="dashboard-mobile-new-customer"
-        type="button"
-        onClick={() => onNavigate("/customers")}
-      >
+      <button className="dashboard-mobile-new-customer" type="button" onClick={() => onNavigate("/customers")}>
         <UserRoundPlus size={16} /> New Customer
       </button>
     </main>
