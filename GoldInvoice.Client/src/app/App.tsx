@@ -39,7 +39,7 @@ function getCurrentPath() {
 
 function roleLabel(roles: string[]): string {
   if (roles.includes("Owner")) return "مالک مجموعه";
-  if (roles.includes("Admin")) return "مدیر مجموعه";
+  if (roles.includes("Admin")) return "مدیر مجموعه";
   if (roles.includes("Employee")) return "کارمند";
   return "مشتری";
 }
@@ -67,7 +67,14 @@ function eventNotice(event: IntegrationEvent): string {
 
 export function App() {
   const auth = useAuthentication();
-  const { language } = useLocale();
+  const { language, setLanguage } = useLocale();
+
+  // The desktop client is intentionally English-first. Persist the choice so
+  // every launch opens in the requested English UI while keeping the existing
+  // localization infrastructure available for a future language switch.
+  useEffect(() => {
+    if (language !== "en") setLanguage("en");
+  }, []);
 
   if (auth.status === "booting") return <AuthenticationSplash />;
   if (auth.recoveryCodes) return <RecoveryCodesPage />;

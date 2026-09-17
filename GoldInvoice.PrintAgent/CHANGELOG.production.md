@@ -1,0 +1,5 @@
+- Added Windows printer inventory and capability inspection helpers.
+- Added spooler preflight and centralized printer failure codes.
+- Added print lease policy tests.
+- Added Windows CI build/test workflow.
+- Physical printer acceptance remains required.
