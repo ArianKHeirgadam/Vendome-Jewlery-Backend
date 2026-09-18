@@ -1,4 +1,4 @@
-import { Info, Search, UserRoundPlus } from "lucide-react";
+import { ArrowUpLeft, Info, Search, UserRoundPlus } from "lucide-react";
 import type { DashboardSnapshot } from "./dashboard.types";
 
 interface DashboardPageProps {
@@ -6,83 +6,120 @@ interface DashboardPageProps {
   onNavigate: (path: string) => void;
 }
 
+function statusLabel(status: string): string {
+  if (status === "Paid") return "پرداخت‌شده";
+  if (status === "Overdue") return "معوق";
+  if (status === "Voided") return "باطل";
+  return "در انتظار";
+}
+
 export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
   const quotes = snapshot.market.goldPrices.slice(0, 2);
   const recent = snapshot.transactions.slice(0, 3);
+  const quickOperations = snapshot.quickOperations.slice(0, 6);
+  const metrics = snapshot.metrics.slice(0, 4);
 
   return (
-    <main className="dashboard-lovable" dir="ltr">
+    <main className="dashboard-lovable" dir="rtl">
       <header className="dashboard-lovable__header">
         <div>
-          <h1>Dashboard Hub</h1>
-          <p>Weekly volume, metal rates, and fast-action shortcuts</p>
+          <p className="dashboard-eyebrow">مدیریت وندوم</p>
+          <h1>سلام، {snapshot.profile.displayName}</h1>
+          <p>نمایی آرام از میز مدیریت؛ معاملات امروز، روند این ماه و آنچه منتظر امضای شماست.</p>
         </div>
-        <div className="dashboard-period" aria-label="Dashboard period">
-          <button className="is-active" type="button">Today</button>
-          <button type="button">This Week</button>
+        <div className="dashboard-period" aria-label="بازه داشبورد">
+          <button className="is-active" type="button">امروز</button>
+          <button type="button">این هفته</button>
         </div>
       </header>
 
-      <section className="dashboard-index-bar" aria-label="Live index rates">
-        <strong>LIVE INDEX RATES:</strong>
+      <section className="dashboard-index-bar" aria-label="نرخ‌های زنده بازار">
+        <strong>نرخ طلای زنده</strong>
         {quotes.map((quote) => (
-          <span key={quote.label}>
-            {quote.label}: <b>{quote.value || "—"}</b>
-          </span>
+          <span key={quote.label}>{quote.label}: <b>{quote.value || "ثبت نشده"}</b></span>
         ))}
         <span className="dashboard-index-info">
-          <Info size={12} /> Updated {snapshot.market.updatedAt || "—"}
+          <Info size={12} /> به‌روزرسانی {snapshot.market.updatedAt || "ثبت نشده"}
         </span>
       </section>
 
-      <button className="dashboard-new-invoice" type="button" onClick={() => onNavigate("/orders/new")}>
-        New Invoice Form
-      </button>
+      <div className="dashboard-actions">
+        <button className="dashboard-new-invoice" type="button" onClick={() => onNavigate("/orders/new")}>
+          <span>+</span> فاکتور جدید
+        </button>
+      </div>
+
+      <section className="dashboard-quick-section">
+        <header><h2>عملیات سریع</h2></header>
+        <div className="dashboard-quick-grid">
+          {quickOperations.map((operation) => (
+            <button className="dashboard-quick-card" type="button" key={operation.id} onClick={() => onNavigate(operation.path)}>
+              <i />
+              <ArrowUpLeft size={18} />
+              <h3>{operation.title}</h3>
+              <p>{operation.description}</p>
+              <small>{operation.meta}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="dashboard-performance">
+        <header><h2>عملکرد</h2></header>
+        <div className="dashboard-metrics-grid">
+          {metrics.map((metric) => (
+            <article className="dashboard-metric-card" key={metric.id}>
+              <span>{metric.label}</span>
+              <strong>{metric.value}</strong>
+              <small>{metric.hint}</small>
+              <em className={metric.direction}>{metric.direction === "up" ? "↗" : metric.direction === "down" ? "↘" : "—"} {metric.trend}</em>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="dashboard-transaction-row">
         <article className="dashboard-session-card">
           <div>
-            <h2>Start New Transaction Session</h2>
-            <p>Initiate workflow with a single barcode scan or name search</p>
+            <h2>شروع تراکنش جدید</h2>
+            <p>فرآیند ثبت را با اسکن بارکد یا جست‌وجوی نام مشتری آغاز کنید.</p>
           </div>
           <button type="button" onClick={() => onNavigate("/orders/new")}>
-            <b>Click 1</b> Initiates Invoice Form
+            <b>کلیک ۱</b> شروع فرم فاکتور
           </button>
         </article>
 
         <article className="dashboard-customer-card">
-          <h2>Autofill Customer Search</h2>
-          <p>Quick lookup profile details, unpaid ledgers &amp; custom purity sizes</p>
+          <h2>جست‌وجوی خودکار مشتری</h2>
+          <p>دسترسی سریع به مشخصات، مانده‌های پرداخت‌نشده و اطلاعات مشتری.</p>
           <label className="dashboard-search">
             <Search size={16} />
             <input
               type="search"
-              placeholder="Enter name or mobile..."
+              placeholder="نام یا شماره موبایل..."
               list="dashboard-customers"
-              aria-label="Search customer"
+              aria-label="جست‌وجوی مشتری"
             />
             <datalist id="dashboard-customers">
               {snapshot.customerSuggestions.map((name) => <option value={name} key={name} />)}
             </datalist>
           </label>
           <div className="dashboard-autofill-note">
-            <strong>AUTOFILL SYSTEM</strong>
-            <span>Searching a name here triggers persistent auto-population of invoicing fields, reducing checkout clicks to 1 tap.</span>
+            <strong>سیستم تکمیل خودکار</strong>
+            <span>با جست‌وجوی نام، اطلاعات لازم برای فاکتور آماده می‌شود.</span>
           </div>
         </article>
       </section>
 
       <section className="dashboard-recent-card">
-        <header>
-          <h2>Recent Transactions</h2>
-        </header>
+        <header><h2>آخرین تراکنش‌ها</h2></header>
         <div className="dashboard-recent-table">
           <div className="dashboard-table-row dashboard-table-head">
-            <span>INV-ID</span>
-            <span>CUSTOMER</span>
-            <span>METAL ITEMS</span>
-            <span>TOTAL</span>
-            <span>STATUS</span>
+            <span>شناسه فاکتور</span>
+            <span>مشتری</span>
+            <span>اقلام فلزی</span>
+            <span>مبلغ کل</span>
+            <span>وضعیت</span>
           </div>
           {recent.length ? recent.map((transaction) => (
             <div className="dashboard-table-row" key={transaction.id}>
@@ -92,18 +129,16 @@ export function DashboardPage({ snapshot, onNavigate }: DashboardPageProps) {
               <span className="numeric">{transaction.amount}</span>
               <span>
                 <em className={`dashboard-status ${transaction.status === "Paid" ? "is-paid" : transaction.status === "Overdue" ? "is-overdue" : ""}`}>
-                  {transaction.status}
+                  {statusLabel(transaction.status)}
                 </em>
               </span>
             </div>
-          )) : (
-            <div className="dashboard-empty-row">No recent transactions.</div>
-          )}
+          )) : <div className="dashboard-empty-row">تراکنش اخیری ثبت نشده است.</div>}
         </div>
       </section>
 
       <button className="dashboard-mobile-new-customer" type="button" onClick={() => onNavigate("/customers")}>
-        <UserRoundPlus size={16} /> New Customer
+        <UserRoundPlus size={16} /> مشتری جدید
       </button>
     </main>
   );
