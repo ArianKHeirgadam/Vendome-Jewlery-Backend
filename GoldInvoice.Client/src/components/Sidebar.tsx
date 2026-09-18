@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { FileText, Home, Plus, SlidersHorizontal, UserRoundPlus, Users, CreditCard, BarChart3 } from "lucide-react";
+import { BarChart3, Boxes, Calculator, CreditCard, FileText, Gem, Home, Package, Plus, Settings2, ShoppingBag, SlidersHorizontal, Truck, UserRoundPlus, Users, UserCog } from "lucide-react";
 
 interface SidebarProps {
   currentPath: string;
@@ -12,9 +12,14 @@ interface NavItem { label:string; path:string; icon:LucideIcon; }
 const navItems:NavItem[]=[
   {label:"Dashboard",path:"/",icon:Home},
   {label:"Invoices",path:"/invoices",icon:FileText},
-  {label:"Payments",path:"/payments",icon:CreditCard},
-  {label:"Reports",path:"/reports",icon:BarChart3},
   {label:"Customers",path:"/customers",icon:Users},
+  {label:"Products",path:"/products",icon:Gem},
+  {label:"Inventory",path:"/inventory",icon:Boxes},
+  {label:"Orders",path:"/orders",icon:ShoppingBag},
+  {label:"Accounting",path:"/accounting",icon:Calculator},
+  {label:"Reports",path:"/reports",icon:BarChart3},
+  {label:"Employees",path:"/employees",icon:UserCog},
+  {label:"Suppliers",path:"/suppliers",icon:Truck},
   {label:"Settings",path:"/settings",icon:SlidersHorizontal},
 ];
 
