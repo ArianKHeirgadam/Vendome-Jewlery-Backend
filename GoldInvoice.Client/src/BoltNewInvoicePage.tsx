@@ -12,14 +12,14 @@ function messageOf(error: unknown): string {
 export function BoltNewInvoicePage({ onNavigate, onNotice }: { onNavigate: (path: string) => void; onNotice: (message: string) => void }) {
   const { data, request, refresh } = useOperations();
   const [customerId, setCustomerId] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [addressId, setAddressId] = useState("");
   const [inventoryItemId, setInventoryItemId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [discount, setDiscount] = useState(0);
   const [shipping, setShipping] = useState(0);
-  const [customerNationalId, setCustomerNationalId] = useState("");
-  const [saving, setSaving] = useState(false);
+    const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paid, setPaid] = useState(false);
 
@@ -27,7 +27,7 @@ export function BoltNewInvoicePage({ onNavigate, onNotice }: { onNavigate: (path
     product.variants.map(variant => ({ ...variant, productName: product.name }))
   ), [data.products]);
 
-  const selectedInventory = data.inventoryItems.find(item => item.id === inventoryItemId);
+  const customerSuggestions = data.customers.filter(item => item.isActive && (!customerSearch.trim() || `${item.displayName} ${item.phoneNumber || ""}`.toLocaleLowerCase().includes(customerSearch.trim().toLocaleLowerCase()))).slice(0, 5);\n\n  const selectedCustomer = data.customers.find(item => item.id === customerId);\n\n  const selectedInventory = data.inventoryItems.find(item => item.id === inventoryItemId);
   const selectedVariant = selectedInventory
     ? variants.find(variant => variant.id === selectedInventory.productVariantId)
     : undefined;
@@ -124,7 +124,7 @@ export function BoltNewInvoicePage({ onNavigate, onNotice }: { onNavigate: (path
           <h1>Generate Invoice</h1>
           <p>Step-by-step transaction workflow</p>
         </div>
-        <button className="bolt-outline-action" type="button" onClick={() => onNavigate("/dashboard")}>Back</button>
+        <span className="bolt-header-action-badge"><b>Action</b> Automatic Rate Lock Active</span>
       </header>
 
       <div className="bolt-header-divider" />
@@ -142,23 +142,45 @@ export function BoltNewInvoicePage({ onNavigate, onNotice }: { onNavigate: (path
             </div>
             <div className="bolt-customer-entry">
               <Search size={16}/>
-              <select value={customerId} onChange={event => setCustomerId(event.target.value)} required>
-                <option value="">Select customer</option>
-                {data.customers.filter(item => item.isActive).map(item => (
-                  <option value={item.id} key={item.id}>{item.displayName}{item.phoneNumber ? ` · ${item.phoneNumber}` : ""}</option>
-                ))}
-              </select>
+              <input
+                value={customerSearch}
+                onChange={event => {
+                  setCustomerSearch(event.target.value);
+                  if (customerId) setCustomerId("");
+                  setAddressId("");
+                }}
+                placeholder="Search customer..."
+                required={!customerId}
+              />
               <button type="button" onClick={() => onNavigate("/customers?new=1")}>+ Add Profile</button>
             </div>
-            {customerId && (
-              <div className="bolt-customer-results">
-                <strong>{data.customers.find(item => item.id === customerId)?.displayName}</strong>
-                <span>{data.customers.find(item => item.id === customerId)?.phoneNumber || "No phone"}</span>
-                <b>[TAB TO AUTO-FILL]</b>
-                {addresses.length ? <div>{addresses.map(address => <button type="button" className={address.id === addressId ? "selected" : ""} key={address.id} onClick={() => setAddressId(address.id)}>{address.title}{address.city ? ` · ${address.city}` : ""}</button>)}</div> : <div>No saved address for this customer.</div>}
-              </div>
-            )}
-            <label className="bolt-inline-field">Customer national ID<input value={customerNationalId} onChange={event => setCustomerNationalId(event.target.value)} /></label>
+            <div className="bolt-customer-results">
+              {customerId ? (
+                <>
+                  <strong>{selectedCustomer?.displayName}</strong>
+                  <span>{selectedCustomer?.phoneNumber || "No phone"}</span>
+                  <b>[TAB TO AUTO-FILL]</b>
+                  {addresses.length ? (
+                    <div className="bolt-address-line">
+                      {addresses.map(address => (
+                        <button type="button" className={address.id === addressId ? "selected" : ""} key={address.id} onClick={() => setAddressId(address.id)}>
+                          {address.title}{address.city ? ` · ${address.city}` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  ) : <div>No saved address for this customer.</div>}
+                </>
+              ) : (
+                customerSuggestions.map(item => (
+                  <button type="button" className="bolt-customer-suggestion" key={item.id} onClick={() => {
+                    setCustomerId(item.id);
+                    setCustomerSearch(item.displayName);
+                  }}>
+                    <strong>{item.displayName}</strong><span>{item.phoneNumber || "No phone"}</span>
+                  </button>
+                ))
+              )}
+            </div>
           </section>
 
           <section className="bolt-form-card bolt-metal-card">
