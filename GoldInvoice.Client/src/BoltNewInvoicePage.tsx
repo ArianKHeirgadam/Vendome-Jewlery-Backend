@@ -29,7 +29,9 @@ export function BoltNewInvoicePage({ onNavigate, onNotice }: { onNavigate: (path
 
   const customerSuggestions = data.customers.filter(item => item.isActive && (!customerSearch.trim() || `${item.displayName} ${item.phoneNumber || ""}`.toLocaleLowerCase().includes(customerSearch.trim().toLocaleLowerCase()))).slice(0, 5);
 
-  const selectedCustomer = data.customers.find(item => item.id === customerId);\n\n  const selectedInventory = data.inventoryItems.find(item => item.id === inventoryItemId);
+  const selectedCustomer = data.customers.find(item => item.id === customerId);
+
+  const selectedInventory = data.inventoryItems.find(item => item.id === inventoryItemId);
   const selectedVariant = selectedInventory
     ? variants.find(variant => variant.id === selectedInventory.productVariantId)
     : undefined;
