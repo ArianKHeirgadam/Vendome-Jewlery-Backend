@@ -16,6 +16,7 @@ import { App } from "./app/App";
 import { AuthenticationProvider } from "./features/auth/AuthContext";
 import { LocaleProvider } from "./i18n/LocaleContext";
 import "./styles.css";
+import "./bolt-reference.css";
 import "./dashboard-lovable.css";
 
 createRoot(document.getElementById("root")!).render(
