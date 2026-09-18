@@ -1,0 +1,6 @@
+import { useOperations } from "./features/operations/OperationsContext";
+import { formatMoney } from "./lib/money";
+export function BoltCustomersPage({onNavigate}:{onNavigate:(path:string)=>void}){
+ const{data}=useOperations();
+ return <main className="module-main bolt-page bolt-customers"><header className="page-header"><div><h1>Customers</h1><p>Customer profiles, purchase history, and outstanding balances</p></div><button className="dark-action" onClick={()=>onNavigate("/customers?new=1")}>+ New Customer</button></header><div className="header-divider"/><div className="customer-reference-grid">{data.customers.slice(0,100).map(c=>{const total=data.invoices.filter(i=>i.customerId===c.id&&i.status!=="Voided").reduce((s,i)=>s+i.grandTotalRials,0);return <article className="customer-reference-card panel" key={c.id}><h2>{c.displayName}</h2><p>{c.phoneNumber||"No phone"}</p><div className="customer-reference-stats"><span>INVOICED<strong>{formatMoney(total)}</strong></span><span>INVOICES<strong>{c.invoiceCount}</strong></span><span>ORDERS<strong>{c.orderCount}</strong></span></div><footer><button onClick={()=>onNavigate(`/invoices?customerId=${c.id}`)}>Invoices</button></footer></article>})}</div></main>
+}
