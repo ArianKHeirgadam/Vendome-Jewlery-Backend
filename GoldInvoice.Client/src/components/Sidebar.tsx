@@ -10,17 +10,17 @@ interface SidebarProps {
 interface NavItem { label:string; path:string; icon:LucideIcon; }
 
 const navItems:NavItem[]=[
-  {label:"Dashboard",path:"/",icon:Home},
-  {label:"Invoices",path:"/invoices",icon:FileText},
-  {label:"Customers",path:"/customers",icon:Users},
-  {label:"Products",path:"/products",icon:Gem},
-  {label:"Inventory",path:"/inventory",icon:Boxes},
-  {label:"Orders",path:"/orders",icon:ShoppingBag},
-  {label:"Accounting",path:"/accounting",icon:Calculator},
-  {label:"Reports",path:"/reports",icon:BarChart3},
-  {label:"Employees",path:"/employees",icon:UserCog},
-  {label:"Suppliers",path:"/suppliers",icon:Truck},
-  {label:"Settings",path:"/settings",icon:SlidersHorizontal},
+  {label:"داشبورد",path:"/",icon:Home},
+  {label:"فاکتورها",path:"/invoices",icon:FileText},
+  {label:"مشتریان",path:"/customers",icon:Users},
+  {label:"محصولات",path:"/products",icon:Gem},
+  {label:"انبار",path:"/inventory",icon:Boxes},
+  {label:"سفارش‌ها",path:"/orders",icon:ShoppingBag},
+  {label:"حسابداری",path:"/accounting",icon:Calculator},
+  {label:"گزارش‌ها",path:"/reports",icon:BarChart3},
+  {label:"کارکنان",path:"/employees",icon:UserCog},
+  {label:"تأمین‌کنندگان",path:"/suppliers",icon:Truck},
+  {label:"تنظیمات",path:"/settings",icon:SlidersHorizontal},
 ];
 
 export function Sidebar({currentPath,isOpen,onNavigate,onClose}:SidebarProps){
