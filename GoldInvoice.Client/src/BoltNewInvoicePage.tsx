@@ -1,4 +1,4 @@
-import { Info, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createIdempotencyKey, OperationalApiError } from "./features/operations/operationsApi";
 import { useOperations } from "./features/operations/OperationsContext";
@@ -216,8 +216,6 @@ export function BoltNewInvoicePage({ onNavigate, onNotice }: { onNavigate: (path
             <button className={!paid ? "selected" : ""} type="button" onClick={() => setPaid(false)}>Unpaid/Credit</button>
             <button className={paid ? "selected" : ""} type="button" onClick={() => setPaid(true)}>Fully Paid</button>
           </div>
-          <label className="bolt-money-field">Discount (tomans)<input type="number" min="0" value={discount} onChange={event => setDiscount(Math.max(0, Number(event.target.value) || 0))}/></label>
-          <label className="bolt-money-field">Shipping (tomans)<input type="number" min="0" value={shipping} onChange={event => setShipping(Math.max(0, Number(event.target.value) || 0))}/></label>
           <button className="bolt-save-button" type="submit" disabled={saving}>{saving ? "Saving..." : "▣  One-Tap Print & Save"}</button>
           {error && <div className="bolt-form-error">{error}</div>}
           <span className="bolt-session-badge bolt-submit-badge"><b>Click 3</b> Submit Invoice Instantly</span>
