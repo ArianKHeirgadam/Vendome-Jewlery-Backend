@@ -1,0 +1,42 @@
+name: .NET
+
+on:
+  push:
+    branches: [ main, printer-production-hardening ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: GoldInvoice.Client/package-lock.json
+
+      - name: Install React dependencies
+        run: npm ci --prefix GoldInvoice.Client
+
+      - name: Build React client
+        run: npm run build --prefix GoldInvoice.Client
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build --verbosity normal

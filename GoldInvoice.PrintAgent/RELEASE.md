@@ -1,0 +1,1 @@
+Release gate: CI must pass; then physical printer acceptance must pass on the target Windows environment. The latter validates actual paper output and device-specific behavior not observable from repository code alone.

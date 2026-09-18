@@ -204,7 +204,7 @@ export function buildDashboardSnapshot(
       invoiceCount: values.invoices.size,
     }))
     .sort((left, right) => right.revenueRials - left.revenueRials)
-    .slice(0, 4)
+    .slice(0, 4);
   if (!categories.length) categories.push({ categoryId: undefined, label: "بدون فروش ماهانه", value: 0, revenueRials: 0, productCount: 0, invoiceCount: 0 });
 
   const gold18 = data.marketPrices.find((price) => price.priceType === "Gold18K");
@@ -215,6 +215,37 @@ export function buildDashboardSnapshot(
     .sort((left, right) => right.getTime() - left.getTime())[0];
   const quote = (price: MarketPrice | undefined, side: "buy" | "sell") =>
     price ? formatMoney(side === "buy" ? price.buyPriceRials : price.sellPriceRials) : "ثبت نشده";
+
+  const customerSuggestions = data.customers
+    .filter((customer) => customer.isActive && customer.displayName.trim())
+    .map((customer) => customer.displayName.trim())
+    .slice(0, 100);
+
+  const transactions = data.invoices.slice(0, 5).map((invoice) => {
+    const verifiedPayment = invoice.paymentId
+      ? data.payments.find((payment) => payment.id === invoice.paymentId && payment.status === "Verified")
+      : data.payments.find((payment) => payment.invoiceId === invoice.id && payment.status === "Verified");
+    const isOverdue = !verifiedPayment && new Date(invoice.issuedAt).getTime() < Date.now() - 86_400_000;
+    const status = invoice.status === "Voided"
+      ? "Voided"
+      : verifiedPayment
+        ? "Paid"
+        : isOverdue
+          ? "Overdue"
+          : "Unpaid";
+    const firstItem = invoice.items[0];
+    const detail = firstItem
+      ? `${firstItem.karat ? `${firstItem.karat}K ` : ""}${firstItem.productName}${firstItem.variantName ? ` · ${firstItem.variantName}` : ""}`
+      : `Invoice ${invoice.invoiceNumber}`;
+    return {
+      id: invoice.invoiceNumber,
+      customer: invoice.customerNameSnapshot || "Registered customer",
+      detail,
+      amount: formatMoney(invoice.grandTotalRials),
+      status,
+      positive: status === "Paid",
+    };
+  });
 
   return {
     profile,
@@ -227,13 +258,14 @@ export function buildDashboardSnapshot(
       { id: "financial-workspace", title: locale === "en-US" ? "Assets & Expenses" : "دارایی‌ها و هزینه‌ها", description: locale === "en-US" ? "Inventory value and financial ledgers for Houman and Ali." : "موجودی انبار و دفتر مالی هومن و علی.", meta: formatMoney(inventoryValue), path: "/financial-workspace" },
     ],
     metrics,
+    customerSuggestions,
     market: {
       updatedAt: latestMarketDate
         ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(latestMarketDate)
         : "نرخی ثبت نشده",
       goldPrices: [
-        { label: "طلای ۱۸ عیار", value: quote(gold18, "sell") },
-        { label: "طلای ۲۴ عیار (محاسباتی)", value: quote(gold24, "sell") },
+        { label: "Gold 18K", value: quote(gold18, "sell") },
+        { label: "Gold 24K", value: quote(gold24, "sell") },
       ],
       trading: [
         { label: "خرید طلای ۱۸", value: quote(gold18, "buy") },
@@ -250,17 +282,11 @@ export function buildDashboardSnapshot(
     },
     revenue,
     categories,
-    transactions: data.invoices.slice(0, 5).map((invoice) => ({
-      id: invoice.id,
-      customer: invoice.customerNameSnapshot || "مشتری ثبت‌شده",
-      detail: `${new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(new Date(invoice.issuedAt))} · فاکتور ${invoice.invoiceNumber}`,
-      amount: `+${formatMoney(invoice.grandTotalRials)}`,
-      positive: invoice.status !== "Voided",
-    })),
+    transactions,
     upcomingPayments: pendingOrders.slice(0, 4).map((order) => ({
       id: order.id,
-      title: `سفارش ${order.orderNumber} · ${order.customerNameSnapshot || "مشتری"}`,
-      dueDate: "در انتظار تسویه",
+      title: `Order ${order.orderNumber} · ${order.customerNameSnapshot || "Customer"}`,
+      dueDate: "Awaiting settlement",
       amount: formatMoney(order.grandTotalRials),
     })),
   };
