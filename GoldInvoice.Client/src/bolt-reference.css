@@ -451,3 +451,72 @@
   .bolt-outline-action { margin-top:0; }
   .bolt-invoice-layout { gap:16px; }
 }
+
+
+/* Exact Bolt invoice header/search geometry */
+.bolt-header-action-badge {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  margin-top:14px;
+  padding:3px 8px;
+  color:#e87900;
+  border:1px solid #f08a00;
+  border-radius:6px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:10px;
+}
+.bolt-header-action-badge b {
+  padding:1px 5px;
+  color:#fff;
+  background:#eb8500;
+  border-radius:3px;
+  font-weight:700;
+}
+.bolt-customer-entry input {
+  flex:1;
+  min-width:0;
+  padding:0 12px 0 31px;
+  color:#172033;
+  border:1px solid #f08a00;
+  border-radius:6px;
+  background:#fffaf0;
+  outline:none;
+  font-size:12px;
+}
+.bolt-customer-entry input::placeholder { color:#536075; }
+.bolt-customer-results {
+  min-height:82px;
+  padding:9px;
+  background:#fff;
+}
+.bolt-customer-suggestion {
+  width:100%;
+  min-height:30px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:0;
+  padding:6px 7px;
+  color:#536075;
+  background:transparent;
+  border:0;
+  border-radius:3px;
+  text-align:left;
+  cursor:pointer;
+  font-size:12px;
+}
+.bolt-customer-suggestion:hover { background:#f0f1f3; }
+.bolt-customer-suggestion strong { color:#172033; }
+.bolt-customer-suggestion span {
+  color:#536075;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:11px;
+}
+.bolt-address-line {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:8px;
+}
+.bolt-address-line button { margin:0; }
