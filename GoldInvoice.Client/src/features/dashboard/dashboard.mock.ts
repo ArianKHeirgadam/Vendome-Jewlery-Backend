@@ -70,5 +70,6 @@ export const dashboardMock: DashboardSnapshot = {
   revenue: [],
   categories: [],
   transactions: [],
+  customerSuggestions: [],
   upcomingPayments: [],
 };
