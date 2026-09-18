@@ -30,7 +30,7 @@ export function Sidebar({currentPath,isOpen,onNavigate,onClose}:SidebarProps){
     </div>
     <div className="sidebar-mobile-heading"><button type="button" aria-label="Close menu" onClick={onClose}>×</button></div>
     <nav aria-label="Main navigation"><div className="nav-list">{navItems.map(({label,path,icon:Icon})=>{
-      const base=currentPath.split("?")[0]; const active=path==="/"?(base==="/"||base==="/dashboard"):base===path||base.startsWith(path+"/");
+      const base=currentPath.split("?")[0]; const active=path==="/"?(base==="/"||base==="/dashboard"):path==="/invoices"&&base.startsWith("/orders/new")||base===path||base.startsWith(path+"/");
       return <a className={`nav-item ${active?"nav-item--active":""}`} href={path} key={path} aria-current={active?"page":undefined} onClick={e=>{e.preventDefault();onNavigate(path)}}><Icon size={18} strokeWidth={1.45}/><span>{label}</span></a>;
     })}</div></nav>
   </aside>;
