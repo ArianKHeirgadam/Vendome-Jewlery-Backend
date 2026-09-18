@@ -20,3 +20,7 @@ export function formatTomansFromRials(value: number): string {
   const amount = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(rialsToTomans(value));
   return `${amount} ${locale === "fa-IR" ? "تومان" : "toman"}`;
 }
+
+export function formatMoney(value: number): string {
+  return formatTomansFromRials(value);
+}
