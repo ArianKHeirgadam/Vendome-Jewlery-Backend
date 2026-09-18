@@ -22,9 +22,9 @@
 .dashboard-index-bar b { font-weight:800; }
 .dashboard-index-info { display:inline-flex; align-items:center; padding:3px 8px; gap:5px; color:#e58b00; border:1px solid #f2a800; border-radius:6px; font-size:10px!important; }
 .dashboard-new-invoice { height:37px; margin:23px 0 24px; padding:0 15px; color:#fff; background:#141b29; border:0; border-radius:5px; font-size:13px; font-weight:700; cursor:pointer; }
-.dashboard-transaction-row { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:20px; align-items:stretch; }
+.dashboard-transaction-row { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:20px; align-items:start; }
 .dashboard-session-card,.dashboard-customer-card,.dashboard-recent-card { background:#fff; border:1px solid #aeb6c4; border-radius:7px; }
-.dashboard-session-card { display:flex; min-height:82px; align-items:center; justify-content:space-between; padding:18px 20px; gap:18px; }
+.dashboard-session-card { display:flex; height:82px; min-height:82px; align-items:center; justify-content:space-between; padding:14px 20px; gap:18px; }
 .dashboard-session-card h2,.dashboard-customer-card h2,.dashboard-recent-card h2 { margin:0; color:#171e2d; font-size:15px; font-weight:750; }
 .dashboard-session-card p,.dashboard-customer-card > p { margin:5px 0 0; color:#566277; font-size:12px; }
 .dashboard-session-card > button { flex:0 0 auto; padding:4px 9px; color:#de8300; background:#fffaf0; border:1px solid #f0a000; border-radius:6px; font-size:10px; cursor:pointer; }
@@ -59,9 +59,9 @@
 .dashboard-sidebar-brand span { display:block; margin-top:1px; color:#9aa3b2; font-family:ui-monospace,monospace; font-size:8px; letter-spacing:.06em; }
 .dashboard-sidebar-shortcuts { display:grid; padding:35px 0 26px; gap:8px; }
 .dashboard-sidebar-shortcuts small { margin:0; color:#8f98a7; font-size:8px; letter-spacing:.07em; }
-.dashboard-sidebar-shortcuts button { display:flex; min-height:37px; align-items:center; padding:0 10px; gap:8px; color:#465269; background:#fff; border:1px solid #9da7b7; border-radius:6px; font-size:12px; cursor:pointer; }
+.dashboard-sidebar-shortcuts button { display:flex; min-height:37px; align-items:center; padding:0 10px; gap:8px; color:#465269; background:#fff; border:1px solid #9da7b7; border-radius:6px; font-size:13px; font-weight:700; cursor:pointer; }
 .dashboard-sidebar-shortcuts button:first-of-type { color:#df8100; border-color:#ed9800; }
-.dashboard-sidebar-shortcuts button kbd { margin-left:auto; color:#9ba4b2; background:transparent; border:0; font-family:ui-monospace,monospace; font-size:9px; }
+.dashboard-sidebar-shortcuts button kbd { margin-left:auto; color:#9ba4b2; background:transparent; border:0; font-family:ui-monospace,monospace; font-size:10px; font-weight:700; }
 .app-shell:has(.dashboard-lovable) .nav-list { display:grid; gap:2px; }
 .app-shell:has(.dashboard-lovable) .nav-item { min-height:34px; padding:7px 10px; gap:9px; color:#4d596d; border-radius:6px; font-size:13px; }
 .app-shell:has(.dashboard-lovable) .nav-item svg { color:#596579; }
