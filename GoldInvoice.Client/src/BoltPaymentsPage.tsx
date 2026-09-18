@@ -1,0 +1,16 @@
+import { Search } from "lucide-react";
+import { useMemo } from "react";
+import { useOperations } from "./features/operations/OperationsContext";
+import { formatMoney } from "./lib/money";
+
+export function BoltPaymentsPage(){
+ const{data}=useOperations();
+ const rows=useMemo(()=>data.orders.map(order=>{const paid=data.payments.filter(p=>p.orderId===order.id&&p.status==="Verified").reduce((s,p)=>s+p.amountRials,0);return{order,balance:Math.max(0,order.grandTotalRials-paid)}}).filter(x=>x.balance>0&&!["Cancelled","Refunded"].includes(x.order.status)).slice(0,50),[data]);
+ const total=rows.reduce((s,x)=>s+x.balance,0);
+ return <main className="module-main bolt-page"><header className="page-header"><div><h1>Payments & Customer Dues Tracker</h1><p>Aging ledgers, custom purity dues, and automated installment recording</p></div><div className="receipt-actions"><button className="outline-action">Export Statement</button><button className="dark-action">+ Bulk Collection</button></div></header><div className="header-divider"/>
+ <div className="rates-bar"><span className="rates-label">LIVE INDEX RATES:</span>{data.marketPrices.slice(0,3).map(p=><span key={p.id}>{p.priceType}: <strong>{formatMoney(p.sellPriceRials)}/g</strong></span>)}</div>
+ <div className="metrics-grid"><section className="metric-card panel"><span className="metric-label">CURRENT DUE</span><strong>{formatMoney(total)}</strong><p className="gray">Open customer balances</p></section><section className="metric-card panel"><span className="metric-label">OPEN ACCOUNTS</span><strong>{rows.length}</strong><p className="orange">Awaiting settlement</p></section><section className="metric-card panel"><span className="metric-label">VERIFIED PAYMENTS</span><strong>{data.payments.filter(p=>p.status==="Verified").length}</strong><p className="green">Confirmed transactions</p></section><section className="metric-card panel"><span className="metric-label">OUTSTANDING ORDERS</span><strong>{data.orders.filter(o=>!["Paid","Completed","Cancelled","Refunded"].includes(o.status)).length}</strong><p className="red">Need follow-up</p></section></div>
+ <section className="dues-table panel"><div className="dues-toolbar"><div className="search-form"><Search size={16}/><input placeholder="Search customer or Invoice ID..."/></div><span><b>Quick Filter:</b> <button className="filter-chip active">All Dues ({rows.length})</button></span></div>
+ <div className="due-heading due-grid"><span>CUSTOMER ID</span><span>NAME & CONTACT</span><span>ORIGINAL INV</span><span>DUES CATEGORY</span><span>BAL DUE</span><span>AGING STATUS</span><span>FAST ACTIONS</span></div>
+ {rows.map(({order,balance})=><div className="due-grid due-row" key={order.id}><span className="invoice-id">{order.customerId.slice(0,8)}</span><strong>{order.customerNameSnapshot||"Customer"}<small>{order.address?.phoneNumber||"—"}</small></strong><span className="invoice-id">{order.orderNumber}</span><span>{order.items[0]?.productName||"Order balance"}</span><b className="total">{formatMoney(balance)}</b><span className="status-badge">Unpaid</span><span><button className="dark-mini">Record Pay</button><button className="outline-mini">Remind</button></span></div>)}</section></main>
+}
