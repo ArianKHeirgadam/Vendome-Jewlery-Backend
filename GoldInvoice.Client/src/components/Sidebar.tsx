@@ -21,7 +21,7 @@ const navItems:NavItem[]=[
 export function Sidebar({currentPath,isOpen,onNavigate,onClose}:SidebarProps){
   return <aside className={`sidebar ${isOpen?"sidebar--open":""}`}>
     <div className="dashboard-sidebar-brand">
-      <strong>zarn</strong><span>INVOICING &amp; ACCOUNTS</span>
+      <strong>zarnorm</strong><span>INVOICING &amp; ACCOUNTS</span>
       <div className="dashboard-sidebar-shortcuts">
         <small>SPEED SHORTCUTS</small>
         <button type="button" onClick={()=>onNavigate("/orders/new")}><Plus size={16}/><span>+ New Invoice</span><kbd>F1</kbd></button>
