@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { Info, Search } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createIdempotencyKey, OperationalApiError } from "./features/operations/operationsApi";
 import { useOperations } from "./features/operations/OperationsContext";
@@ -13,6 +13,7 @@ export function BoltNewInvoicePage({ onNavigate, onNotice }: { onNavigate: (path
   const { data, request, refresh } = useOperations();
   const [customerId, setCustomerId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
+  const [customerNationalId, setCustomerNationalId] = useState("");
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [addressId, setAddressId] = useState("");
   const [inventoryItemId, setInventoryItemId] = useState("");
